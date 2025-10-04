@@ -9,14 +9,32 @@ interface MapComponentProps {
   useCurrentLocation?: boolean;
 }
 
+// Mock route data - will be replaced with backend data later
+const MOCK_ROUTE = {
+  userLocation: { lat: 50.0647, lng: 19.9450 }, // Starting point
+  firstStation: { lat: 50.05935, lng: 19.943175 }, // Poczta Główna
+  busStations: [
+    { lat: 50.05935, lng: 19.943175 }, // Poczta Główna
+    { lat: 50.054804, lng: 19.9471229 }, // Starowiślna
+    { lat: 50.0583292, lng: 19.9492247 }, // Hala Targowa
+    { lat: 50.0574422, lng: 19.9594329 }, // Rondo Grzegórzeckie
+    { lat: 50.05678109999999, lng: 19.9639488 }, // Teatr Variété
+    { lat: 50.0864011, lng: 20.0337437 }, // Cienista (last station)
+  ],
+  lastStation: { lat: 50.0864011, lng: 20.0337437 }, // Cienista
+  finalDestination: { lat: 50.0900, lng: 20.0370 }, // Final destination
+};
+
 export default function MapComponent({
   center = { lat: 50.0647, lng: 19.9450 },
   zoom = 13,
-  useCurrentLocation = true
+  useCurrentLocation = false
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
   const [currentLocation, setCurrentLocation] = useState(center);
+  const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
+  const directionsRenderersRef = useRef<google.maps.DirectionsRenderer[]>([]);
 
   useEffect(() => {
     // Get user's current location
@@ -103,15 +121,161 @@ export default function MapComponent({
         fullscreenControl: false,
       });
 
-      // Add marker at current location
+      // Initialize Directions Service
+      directionsServiceRef.current = new google.maps.DirectionsService();
+
+      // Draw the routes
+      drawRoutes();
+    };
+
+    const drawRoutes = () => {
+      if (!googleMapRef.current || !directionsServiceRef.current) return;
+
+      // Clear existing renderers
+      directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
+      directionsRenderersRef.current = [];
+
+      // 1. Walking route: User location → First station (DASHED BLUE)
+      const walkingRenderer1 = new google.maps.DirectionsRenderer({
+        map: googleMapRef.current,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#06B6D4', // Blue for walking to station
+          strokeWeight: 4,
+          strokeOpacity: 0.8,
+          icons: [{
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+            offset: '0',
+            repeat: '20px'
+          }]
+        }
+      });
+
+      directionsServiceRef.current.route({
+        origin: MOCK_ROUTE.userLocation,
+        destination: MOCK_ROUTE.firstStation,
+        travelMode: google.maps.TravelMode.WALKING,
+      }, (result, status) => {
+        if (status === 'OK' && result) {
+          walkingRenderer1.setDirections(result);
+        }
+      });
+
+      directionsRenderersRef.current.push(walkingRenderer1);
+
+      // 2. Bus route: First station → through all stations → Last station (SOLID)
+      const busRenderer = new google.maps.DirectionsRenderer({
+        map: googleMapRef.current,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#E63946', // Red for bus
+          strokeWeight: 6,
+          strokeOpacity: 1,
+        }
+      });
+
+      // Create waypoints from middle stations
+      const waypoints = MOCK_ROUTE.busStations.slice(1, -1).map(station => ({
+        location: new google.maps.LatLng(station.lat, station.lng),
+        stopover: true
+      }));
+
+      directionsServiceRef.current.route({
+        origin: MOCK_ROUTE.firstStation,
+        destination: MOCK_ROUTE.lastStation,
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (result, status) => {
+        if (status === 'OK' && result) {
+          busRenderer.setDirections(result);
+        }
+      });
+
+      directionsRenderersRef.current.push(busRenderer);
+
+      // 3. Walking route: Last station → Final destination (DASHED)
+      const walkingRenderer2 = new google.maps.DirectionsRenderer({
+        map: googleMapRef.current,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#10B981', // Green for walking
+          strokeWeight: 4,
+          strokeOpacity: 0.8,
+          icons: [{
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+            offset: '0',
+            repeat: '20px'
+          }]
+        }
+      });
+
+      directionsServiceRef.current.route({
+        origin: MOCK_ROUTE.lastStation,
+        destination: MOCK_ROUTE.finalDestination,
+        travelMode: google.maps.TravelMode.WALKING,
+      }, (result, status) => {
+        if (status === 'OK' && result) {
+          walkingRenderer2.setDirections(result);
+        }
+      });
+
+      directionsRenderersRef.current.push(walkingRenderer2);
+
+      // Add markers
+      // User location marker
       new google.maps.Marker({
-        position: currentLocation,
+        position: MOCK_ROUTE.userLocation,
         map: googleMapRef.current,
         title: 'Your Location',
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 8,
           fillColor: '#4285F4',
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 2,
+        },
+      });
+
+      // First station marker
+      new google.maps.Marker({
+        position: MOCK_ROUTE.firstStation,
+        map: googleMapRef.current,
+        title: 'Poczta Główna (Boarding)',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#E63946',
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 3,
+        },
+      });
+
+      // Last station marker
+      new google.maps.Marker({
+        position: MOCK_ROUTE.lastStation,
+        map: googleMapRef.current,
+        title: 'Cienista (Exit)',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 10,
+          fillColor: '#E63946',
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 3,
+        },
+      });
+
+      // Final destination marker
+      new google.maps.Marker({
+        position: MOCK_ROUTE.finalDestination,
+        map: googleMapRef.current,
+        title: 'Final Destination',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: '#10B981',
           fillOpacity: 1,
           strokeColor: '#FFFFFF',
           strokeWeight: 2,
