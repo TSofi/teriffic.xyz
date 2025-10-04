@@ -12,9 +12,17 @@ router = APIRouter()
 
 LINE_NUMBERS = ["2", "19", "20"]
 
+# Cache stations to avoid refetching on every request
+_stations_cache = None
+_line_stations_cache = {}
 
 def get_all_stations() -> List[Dict]:
-    """Fetch all stations from database"""
+    """Fetch all stations from database with caching"""
+    global _stations_cache
+
+    if _stations_cache is not None:
+        return _stations_cache
+
     all_stations = []
     offset = 0
     page_size = 1000
@@ -28,16 +36,23 @@ def get_all_stations() -> List[Dict]:
         if len(response.data) < page_size:
             break
 
+    _stations_cache = all_stations
     return all_stations
 
 
 def get_stations_for_lines(line_numbers: List[str]) -> List[int]:
-    """Get all unique station IDs used by specific lines"""
+    """Get all unique station IDs used by specific lines with caching"""
+    global _line_stations_cache
+
+    cache_key = ",".join(sorted(line_numbers))
+    if cache_key in _line_stations_cache:
+        return _line_stations_cache[cache_key]
+
     station_ids = set()
 
     for line_number in line_numbers:
         offset = 0
-        page_size = 100
+        page_size = 1000  # Increased from 100 to 1000
 
         while True:
             response = supabase.table("routes").select("stations_info").eq("line_number", line_number).range(offset, offset + page_size - 1).execute()
@@ -52,7 +67,9 @@ def get_stations_for_lines(line_numbers: List[str]) -> List[int]:
             if len(response.data) < page_size:
                 break
 
-    return list(station_ids)
+    result = list(station_ids)
+    _line_stations_cache[cache_key] = result
+    return result
 
 
 def find_best_route(
@@ -72,6 +89,8 @@ def find_best_route(
     for line_number in line_numbers:
         offset = 0
         page_size = 1000
+        routes_checked_for_line = 0
+        should_stop = False
 
         while True:
             response = supabase.table("routes").select("*").eq("line_number", line_number).range(offset, offset + page_size - 1).execute()
@@ -88,9 +107,16 @@ def find_best_route(
 
                 first_departure = datetime.strptime(stations_info[0]["departure_time"], "%Y-%m-%d %H:%M:%S")
 
-                # Skip if route starts before user arrival time or more than 12 hours after
-                if first_departure < user_arrival_time or first_departure > max_time:
+                # OPTIMIZATION: Since routes are sorted by date, stop when we pass 12-hour window
+                if first_departure > max_time:
+                    should_stop = True
+                    break
+
+                # Skip if route starts before user arrival time
+                if first_departure < user_arrival_time:
                     continue
+
+                routes_checked_for_line += 1
 
                 # Find if this route contains both stations in correct order
                 departure_index = None
@@ -124,6 +150,11 @@ def find_best_route(
                                 "waiting_time_minutes": waiting_time
                             }
 
+            # Stop searching this line if we passed the time window
+            if should_stop:
+                print(f"DEBUG: Stopped early for line {line_number} (checked {routes_checked_for_line} routes)")
+                break
+
             offset += page_size
             if len(response.data) < page_size:
                 break
@@ -141,22 +172,31 @@ async def plan_journey(request: JourneyRequest):
     """
 
     try:
+        import time
+        start_time = time.time()
+
         # Parse departure time
         user_departure_time = datetime.fromisoformat(request.departure_time)
 
         # Get all stations
+        stations_start = time.time()
         all_stations = get_all_stations()
+        print(f"⏱️ Get all stations: {time.time() - stations_start:.2f}s")
 
         # Get stations used by our lines
+        line_stations_start = time.time()
         line_station_ids = get_stations_for_lines(LINE_NUMBERS)
         line_stations = [s for s in all_stations if s['id'] in line_station_ids]
+        print(f"⏱️ Get line stations: {time.time() - line_stations_start:.2f}s")
 
         # Find closest departure station
+        dep_search_start = time.time()
         departure_result = find_closest_station(
             request.start_latitude,
             request.start_longitude,
             line_stations
         )
+        print(f"⏱️ Find departure station: {time.time() - dep_search_start:.2f}s")
 
         if not departure_result:
             raise HTTPException(status_code=404, detail="No departure station found")
@@ -164,11 +204,13 @@ async def plan_journey(request: JourneyRequest):
         print(f"DEBUG: Departure station: {departure_result['station']['name']} (ID: {departure_result['station']['id']})")
 
         # Find closest arrival station
+        arr_search_start = time.time()
         arrival_result = find_closest_station(
             request.destination_latitude,
             request.destination_longitude,
             line_stations
         )
+        print(f"⏱️ Find arrival station: {time.time() - arr_search_start:.2f}s")
 
         if not arrival_result:
             raise HTTPException(status_code=404, detail="No arrival station found")
@@ -182,12 +224,14 @@ async def plan_journey(request: JourneyRequest):
         print(f"DEBUG: User arrives at station: {user_arrival_at_station}")
 
         # Find best route
+        route_search_start = time.time()
         best_route = find_best_route(
             departure_result['station']['id'],
             arrival_result['station']['id'],
             user_arrival_at_station,
             LINE_NUMBERS
         )
+        print(f"⏱️ Find best route: {time.time() - route_search_start:.2f}s")
 
         if not best_route:
             print(f"DEBUG: No route found between station {departure_result['station']['id']} and {arrival_result['station']['id']}")
