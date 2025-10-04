@@ -91,6 +91,7 @@ def find_best_route(
         page_size = 1000
         routes_checked_for_line = 0
         should_stop = False
+        found_valid_route_for_line = False
 
         while True:
             response = supabase.table("routes").select("*").eq("line_number", line_number).range(offset, offset + page_size - 1).execute()
@@ -149,8 +150,16 @@ def find_best_route(
                                 "arrival_index": arrival_index,
                                 "waiting_time_minutes": waiting_time
                             }
+                            found_valid_route_for_line = True
 
-            # Stop searching this line if we passed the time window
+                        # OPTIMIZATION: If we found a valid route and next route has longer wait, stop this line
+                        elif found_valid_route_for_line:
+                            # Routes are sorted by time, so remaining routes will have even longer waits
+                            should_stop = True
+                            print(f"DEBUG: Found best route for line {line_number}, skipping remaining routes")
+                            break
+
+            # Stop searching this line if we passed the time window or found best
             if should_stop:
                 print(f"DEBUG: Stopped early for line {line_number} (checked {routes_checked_for_line} routes)")
                 break
