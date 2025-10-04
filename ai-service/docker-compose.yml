@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  ai-service:
+    build: .
+    container_name: bus-tracker-ai
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - MODEL_NAME=${MODEL_NAME:-google/gemma-2-27b-it}
+      - DEBUG=${DEBUG:-false}
+      - CONVERSATION_TTL_HOURS=${CONVERSATION_TTL_HOURS:-24}
+    volumes:
+      - ./src:/app/src
+    restart: unless-stopped
+    networks:
+      - bus-tracker-network
+
+networks:
+  bus-tracker-network:
+    driver: bridge
