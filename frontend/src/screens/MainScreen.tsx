@@ -560,6 +560,29 @@ export default function MainScreen({ navigation }: Props) {
           </View>
         </View>
 
+        {/* Time Information - Below Header */}
+        {routeData && (
+          <View style={styles.timeInfoWrapper}>
+            <View style={styles.timeInfoContainer}>
+              <View style={[styles.timeTag, { borderColor: '#06B6D4' }]}>
+                <Text style={[styles.timeTagText, { color: '#06B6D4' }]}>
+                  {Math.ceil(routeData.walking_to_departure_time_minutes)} min
+                </Text>
+              </View>
+              <View style={[styles.timeTag, { borderColor: '#000000', backgroundColor: '#000000' }]}>
+                <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
+                  {Math.ceil(routeData.total_journey_time_minutes)} min
+                </Text>
+              </View>
+              <View style={[styles.timeTag, { borderColor: '#10B981' }]}>
+                <Text style={[styles.timeTagText, { color: '#10B981' }]}>
+                  {Math.ceil(routeData.walking_from_arrival_time_minutes)} min
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Bottom Panel */}
         <Animated.View
           style={[
@@ -777,6 +800,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 20,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  timeInfoWrapper: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 230 : 210,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    zIndex: 5,
+  },
+  timeInfoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  timeTag: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 3,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  timeTagText: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    fontFamily: 'Inter, sans-serif',
   },
   routeInputContainer: {
     backgroundColor: '#FFFFFF',
