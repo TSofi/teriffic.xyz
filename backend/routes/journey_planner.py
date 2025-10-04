@@ -162,6 +162,37 @@ def find_best_route(
     return best_route
 
 
+@router.get("/closest-station")
+async def get_closest_station(latitude: float, longitude: float):
+    """
+    Find the closest station to given coordinates.
+
+    Returns station details including distance and walking time.
+    """
+    try:
+        # Get all stations (uses cache)
+        all_stations = get_all_stations()
+
+        # Find closest station
+        result = find_closest_station(latitude, longitude, all_stations)
+
+        if not result:
+            raise HTTPException(status_code=404, detail="No station found")
+
+        return {
+            "station": result['station'],
+            "distance_km": result['distance_km'],
+            "walking_time_minutes": result['walking_time_minutes']
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.post("/plan-journey", response_model=JourneyResponse)
 async def plan_journey(request: JourneyRequest):
     """
@@ -201,7 +232,7 @@ async def plan_journey(request: JourneyRequest):
         if not departure_result:
             raise HTTPException(status_code=404, detail="No departure station found")
 
-        print(f"DEBUG: Departure station: {departure_result['station']['name']} (ID: {departure_result['station']['id']})")
+        print(f"DEBUG: Departure station: {departure_result['station']['name']} (ID: {departure_result['station']['id']}) - Distance: {departure_result['distance_km']:.2f}km")
 
         # Find closest arrival station
         arr_search_start = time.time()
@@ -215,7 +246,11 @@ async def plan_journey(request: JourneyRequest):
         if not arrival_result:
             raise HTTPException(status_code=404, detail="No arrival station found")
 
-        print(f"DEBUG: Arrival station: {arrival_result['station']['name']} (ID: {arrival_result['station']['id']})")
+        print(f"DEBUG: Arrival station: {arrival_result['station']['name']} (ID: {arrival_result['station']['id']}) - Distance: {arrival_result['distance_km']:.2f}km")
+
+        # Check if it's the same station
+        if departure_result['station']['id'] == arrival_result['station']['id']:
+            raise HTTPException(status_code=400, detail="Departure and arrival stations are the same. You may be very close to your destination - consider walking.")
 
         # Calculate when user arrives at departure station
         user_arrival_at_station = user_departure_time + timedelta(minutes=departure_result['walking_time_minutes'])
@@ -288,7 +323,8 @@ async def plan_journey(request: JourneyRequest):
                     arrival_time=station_info['arrival_time'],
                     departure_time=station_info['departure_time'],
                     is_boarding_station=(i == dep_idx),
-                    is_exit_station=(i == arr_idx)
+                    is_exit_station=(i == arr_idx),
+                    route_id=route['id']
                 ))
 
         # Build response
