@@ -29,6 +29,7 @@ class BusStationStop(BaseModel):
     departure_time: str
     is_boarding_station: bool  # True if this is where user gets on
     is_exit_station: bool      # True if this is where user gets off
+    route_id: int              # Route ID for this journey
 
 
 class JourneyResponse(BaseModel):
