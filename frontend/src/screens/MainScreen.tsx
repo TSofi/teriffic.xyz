@@ -273,10 +273,18 @@ export default function MainScreen({ navigation }: Props) {
       console.log('Fetching suggestions for:', input);
       const service = new window.google.maps.places.AutocompleteService();
 
+      // Define Krakow bounds
+      const krakowBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(49.9728, 19.7835), // Southwest corner
+        new window.google.maps.LatLng(50.1243, 20.2181)  // Northeast corner
+      );
+
       service.getPlacePredictions(
         {
           input: input,
           componentRestrictions: { country: 'pl' },
+          bounds: krakowBounds,
+          strictBounds: true,
         },
         (predictions, status) => {
           console.log('Autocomplete status:', status);
