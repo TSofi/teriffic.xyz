@@ -13,7 +13,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import MapComponent from '../components/MapComponent';
-import { aiService } from '../services/aiService';
+import { aiService, reverseGeocode, geocodeAddress, planRoute } from '../services/aiService';
 
 type MainScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -39,6 +39,9 @@ export default function MainScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [routeData, setRouteData] = useState<any>(null);
+  const [isSearchingRoute, setIsSearchingRoute] = useState(false);
+  const [isFindingLocation, setIsFindingLocation] = useState(false);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -192,38 +195,162 @@ export default function MainScreen({ navigation }: Props) {
     navigation.navigate('Rewards');
   };
 
+  const handleFindMyLocation = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setIsFindingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        // Reverse geocode to get address
+        const address = await reverseGeocode(latitude, longitude);
+
+        if (address) {
+          setArrivalPoint(address);
+        } else {
+          setArrivalPoint(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+        }
+
+        setIsFindingLocation(false);
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        alert('Could not get your location. Please enable location services.');
+        setIsFindingLocation(false);
+      }
+    );
+  };
+
+  const handleSearchRoute = async () => {
+    if (!arrivalPoint.trim() || !destinationPoint.trim()) {
+      alert('Please enter both arrival and destination addresses');
+      return;
+    }
+
+    setIsSearchingRoute(true);
+
+    try {
+      // Geocode addresses to coordinates
+      const startCoords = await geocodeAddress(arrivalPoint);
+      const destCoords = await geocodeAddress(destinationPoint);
+
+      if (!startCoords || !destCoords) {
+        alert('Could not find one or both addresses. Please try again.');
+        setIsSearchingRoute(false);
+        return;
+      }
+
+      // Get current time for departure
+      const now = new Date();
+      const departureTime = now.toISOString().slice(0, 19);
+
+      // Call route service
+      const route = await planRoute({
+        start_latitude: startCoords.lat,
+        start_longitude: startCoords.lng,
+        destination_latitude: destCoords.lat,
+        destination_longitude: destCoords.lng,
+        departure_time: departureTime,
+      });
+
+      setRouteData(route);
+      console.log('Route planned successfully:', route);
+    } catch (error) {
+      console.error('Route search error:', error);
+      alert('Could not plan route. Please try again.');
+    } finally {
+      setIsSearchingRoute(false);
+    }
+  };
+
   return (
     <View style={[styles.webContainer, isWeb && styles.webCentered]}>
       <View style={[styles.container, isWeb && styles.mobileFrame]}>
         {/* Google Maps Background */}
         <View style={styles.map}>
-          <MapComponent center={{ lat: 50.0647, lng: 19.9450 }} zoom={13} useCurrentLocation={false} />
+          <MapComponent
+            center={{ lat: 50.0647, lng: 19.9450 }}
+            zoom={13}
+            useCurrentLocation={false}
+            routeData={routeData}
+          />
         </View>
 
         {/* Top Header with Route Inputs */}
         <View style={styles.topHeader}>
           <View style={styles.routeInputContainer}>
             <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>FROM</Text>
-              <TextInput
-                style={styles.routeInput}
-                placeholder="Arrival point"
-                placeholderTextColor="#666"
-                value={arrivalPoint}
-                onChangeText={setArrivalPoint}
-              />
+              <View style={styles.inputRow}>
+                <View style={styles.inputContent}>
+                  <Text style={styles.inputLabel}>FROM</Text>
+                  <TextInput
+                    style={styles.routeInput}
+                    placeholder="Arrival point address"
+                    placeholderTextColor="#666"
+                    value={arrivalPoint}
+                    onChangeText={setArrivalPoint}
+                    editable={!isFindingLocation}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={styles.locationButton}
+                  onPress={handleFindMyLocation}
+                  disabled={isFindingLocation}
+                  activeOpacity={0.7}
+                >
+                  {isFindingLocation ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="3"
+                        fill="#FFFFFF"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                      />
+                      <path
+                        d="M12 2V5M12 19V22M22 12H19M5 12H2"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
             <View style={styles.divider} />
             <View style={styles.inputWrapper}>
               <Text style={styles.inputLabel}>TO</Text>
               <TextInput
                 style={styles.routeInput}
-                placeholder="Destination point"
+                placeholder="Destination address"
                 placeholderTextColor="#666"
                 value={destinationPoint}
                 onChangeText={setDestinationPoint}
               />
             </View>
+            {arrivalPoint.trim() && destinationPoint.trim() && (
+              <TouchableOpacity
+                style={styles.searchRouteButton}
+                onPress={handleSearchRoute}
+                disabled={isSearchingRoute}
+                activeOpacity={0.8}
+              >
+                {isSearchingRoute ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.searchRouteIcon}>🔍</Text>
+                )}
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -459,6 +586,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  inputContent: {
+    flex: 1,
+  },
   inputLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -472,6 +607,33 @@ const styles = StyleSheet.create({
     color: '#000',
     fontWeight: '500',
     fontFamily: 'Inter, sans-serif',
+  },
+  locationButton: {
+    width: 36,
+    height: 36,
+    backgroundColor: '#06B6D4',
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchRouteButton: {
+    position: 'absolute',
+    right: 15,
+    bottom: 15,
+    width: 44,
+    height: 44,
+    backgroundColor: '#000000',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  searchRouteIcon: {
+    fontSize: 20,
   },
   divider: {
     height: 1,
