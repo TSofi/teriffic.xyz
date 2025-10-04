@@ -13,7 +13,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import MapComponent from '../components/MapComponent';
-import { aiService } from '../services/aiService';
+import { aiService, reverseGeocode, geocodeAddress, planRoute } from '../services/aiService';
 
 type MainScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -39,11 +39,20 @@ export default function MainScreen({ navigation }: Props) {
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [routeData, setRouteData] = useState<any>(null);
+  const [isSearchingRoute, setIsSearchingRoute] = useState(false);
+  const [isFindingLocation, setIsFindingLocation] = useState(false);
+  const [arrivalSuggestions, setArrivalSuggestions] = useState<any[]>([]);
+  const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
+  const [showArrivalSuggestions, setShowArrivalSuggestions] = useState(false);
+  const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const panelHeightAnim = useRef(new Animated.Value(0)).current;
   const iconOpacityAnim = useRef(new Animated.Value(1)).current;
+  const arrivalDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const destinationDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     Animated.timing(panelHeightAnim, {
@@ -60,6 +69,30 @@ export default function MainScreen({ navigation }: Props) {
       useNativeDriver: true,
     }).start();
   }, [chatMessage]);
+
+  useEffect(() => {
+    console.log('Arrival suggestions updated:', arrivalSuggestions.length);
+    console.log('Show arrival suggestions:', showArrivalSuggestions);
+  }, [arrivalSuggestions, showArrivalSuggestions]);
+
+  useEffect(() => {
+    console.log('Destination suggestions updated:', destinationSuggestions.length);
+    console.log('Show destination suggestions:', showDestinationSuggestions);
+  }, [destinationSuggestions, showDestinationSuggestions]);
+
+  useEffect(() => {
+    // Check if Google Maps Places API is loaded
+    const checkInterval = setInterval(() => {
+      if (window.google?.maps?.places) {
+        console.log('Google Maps Places API is loaded!');
+        clearInterval(checkInterval);
+      } else {
+        console.log('Waiting for Google Maps Places API...');
+      }
+    }, 1000);
+
+    return () => clearInterval(checkInterval);
+  }, []);
 
   const busLines = [
     { number: '999', color: ['#E63946', '#DC2F02'] },
@@ -192,38 +225,323 @@ export default function MainScreen({ navigation }: Props) {
     navigation.navigate('Rewards');
   };
 
+  const handleFindMyLocation = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setIsFindingLocation(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        // Reverse geocode to get address
+        const address = await reverseGeocode(latitude, longitude);
+
+        if (address) {
+          setArrivalPoint(address);
+        } else {
+          setArrivalPoint(`${latitude.toFixed(6)}, ${longitude.toFixed(6)}`);
+        }
+
+        setIsFindingLocation(false);
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        alert('Could not get your location. Please enable location services.');
+        setIsFindingLocation(false);
+      }
+    );
+  };
+
+  const fetchPlaceSuggestions = async (input: string, setSuggestions: (suggestions: any[]) => void) => {
+    if (!input || input.length < 3) {
+      console.log('Input too short:', input);
+      setSuggestions([]);
+      return;
+    }
+
+    try {
+      // Check if Google Maps API is loaded
+      if (!window.google || !window.google.maps || !window.google.maps.places) {
+        console.warn('Google Places API not loaded yet');
+        return;
+      }
+
+      console.log('Fetching suggestions for:', input);
+      const service = new window.google.maps.places.AutocompleteService();
+
+      service.getPlacePredictions(
+        {
+          input: input,
+          componentRestrictions: { country: 'pl' },
+        },
+        (predictions, status) => {
+          console.log('Autocomplete status:', status);
+          console.log('Predictions:', predictions);
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
+            console.log('Setting suggestions:', predictions.length);
+            setSuggestions(predictions);
+          } else {
+            console.log('No predictions or error status');
+            setSuggestions([]);
+          }
+        }
+      );
+    } catch (error) {
+      console.error('Autocomplete error:', error);
+      setSuggestions([]);
+    }
+  };
+
+  const handleArrivalChange = (text: string) => {
+    console.log('Arrival change:', text);
+    setArrivalPoint(text);
+    setShowArrivalSuggestions(true);
+
+    if (arrivalDebounceRef.current) {
+      clearTimeout(arrivalDebounceRef.current);
+    }
+
+    arrivalDebounceRef.current = setTimeout(() => {
+      console.log('Fetching arrival suggestions after debounce');
+      fetchPlaceSuggestions(text, (suggestions) => {
+        console.log('Setting arrival suggestions:', suggestions.length);
+        setArrivalSuggestions(suggestions);
+      });
+    }, 300);
+  };
+
+  const handleDestinationChange = (text: string) => {
+    console.log('Destination change:', text);
+    setDestinationPoint(text);
+    setShowDestinationSuggestions(true);
+
+    if (destinationDebounceRef.current) {
+      clearTimeout(destinationDebounceRef.current);
+    }
+
+    destinationDebounceRef.current = setTimeout(() => {
+      console.log('Fetching destination suggestions after debounce');
+      fetchPlaceSuggestions(text, (suggestions) => {
+        console.log('Setting destination suggestions:', suggestions.length);
+        setDestinationSuggestions(suggestions);
+      });
+    }, 300);
+  };
+
+  const handleSearchRoute = async () => {
+    if (!arrivalPoint.trim() || !destinationPoint.trim()) {
+      alert('Please enter both arrival and destination addresses');
+      return;
+    }
+
+    setIsSearchingRoute(true);
+
+    try {
+      // Geocode addresses to coordinates
+      const startCoords = await geocodeAddress(arrivalPoint);
+      const destCoords = await geocodeAddress(destinationPoint);
+
+      if (!startCoords || !destCoords) {
+        alert('Could not find one or both addresses. Please try again.');
+        setIsSearchingRoute(false);
+        return;
+      }
+
+      // Get current time for departure
+      const now = new Date();
+      const departureTime = now.toISOString().slice(0, 19);
+
+      // Call route service
+      const route = await planRoute({
+        start_latitude: startCoords.lat,
+        start_longitude: startCoords.lng,
+        destination_latitude: destCoords.lat,
+        destination_longitude: destCoords.lng,
+        departure_time: departureTime,
+      });
+
+      setRouteData(route);
+      console.log('Route planned successfully:', route);
+    } catch (error) {
+      console.error('Route search error:', error);
+      alert('Could not plan route. Please try again.');
+    } finally {
+      setIsSearchingRoute(false);
+    }
+  };
+
   return (
     <View style={[styles.webContainer, isWeb && styles.webCentered]}>
       <View style={[styles.container, isWeb && styles.mobileFrame]}>
         {/* Google Maps Background */}
         <View style={styles.map}>
-          <MapComponent center={{ lat: 50.0647, lng: 19.9450 }} zoom={13} useCurrentLocation={false} />
+          <MapComponent
+            center={{ lat: 50.0647, lng: 19.9450 }}
+            zoom={13}
+            useCurrentLocation={false}
+            routeData={routeData}
+          />
         </View>
 
         {/* Top Header with Route Inputs */}
         <View style={styles.topHeader}>
           <View style={styles.routeInputContainer}>
             <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>FROM</Text>
-              <TextInput
-                style={styles.routeInput}
-                placeholder="Arrival point"
-                placeholderTextColor="#666"
-                value={arrivalPoint}
-                onChangeText={setArrivalPoint}
-              />
+              <View style={styles.inputRow}>
+                <Text style={styles.inputLabelLeft}>FROM</Text>
+                <TextInput
+                  style={styles.routeInput}
+                  placeholder="Arrival point address"
+                  placeholderTextColor="#999"
+                  value={arrivalPoint}
+                  onChangeText={handleArrivalChange}
+                  onFocus={() => setShowArrivalSuggestions(true)}
+                  editable={!isFindingLocation}
+                />
+                <TouchableOpacity
+                  style={styles.locationButton}
+                  onPress={handleFindMyLocation}
+                  disabled={isFindingLocation}
+                  activeOpacity={0.7}
+                >
+                  {isFindingLocation ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="3"
+                        fill="#FFFFFF"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                      />
+                      <path
+                        d="M12 2V5M12 19V22M22 12H19M5 12H2"
+                        stroke="#FFFFFF"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {showArrivalSuggestions && arrivalSuggestions.length > 0 ? (
+                <ScrollView
+                  style={styles.suggestionsContainer}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled={true}
+                >
+                  {arrivalSuggestions.slice(0, 5).map((suggestion, index) => {
+                    console.log(`Rendering suggestion ${index}:`, suggestion.description);
+                    return (
+                      <TouchableOpacity
+                        key={suggestion.place_id}
+                        style={[
+                          styles.suggestionItem,
+                          index === arrivalSuggestions.slice(0, 5).length - 1 && styles.suggestionItemLast
+                        ]}
+                        onPress={() => {
+                          console.log('Suggestion clicked:', suggestion.description);
+                          setArrivalPoint(suggestion.description);
+                          setShowArrivalSuggestions(false);
+                          setArrivalSuggestions([]);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.suggestionMainText}>
+                          {suggestion.structured_formatting.main_text}
+                        </Text>
+                        <Text style={styles.suggestionSecondaryText}>
+                          {suggestion.structured_formatting.secondary_text}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
             </View>
             <View style={styles.divider} />
             <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>TO</Text>
-              <TextInput
-                style={styles.routeInput}
-                placeholder="Destination point"
-                placeholderTextColor="#666"
-                value={destinationPoint}
-                onChangeText={setDestinationPoint}
-              />
+              <View style={styles.inputRow}>
+                <Text style={styles.inputLabelLeft}>TO</Text>
+                <TextInput
+                  style={[styles.routeInput, styles.routeInputShorter]}
+                  placeholder="Destination address"
+                  placeholderTextColor="#999"
+                  value={destinationPoint}
+                  onChangeText={handleDestinationChange}
+                  onFocus={() => setShowDestinationSuggestions(true)}
+                />
+              </View>
+              {showDestinationSuggestions && destinationSuggestions.length > 0 ? (
+                <ScrollView
+                  style={styles.suggestionsContainer}
+                  showsVerticalScrollIndicator={false}
+                  nestedScrollEnabled={true}
+                >
+                  {destinationSuggestions.slice(0, 5).map((suggestion, index) => {
+                    console.log(`Rendering destination suggestion ${index}:`, suggestion.description);
+                    return (
+                      <TouchableOpacity
+                        key={suggestion.place_id}
+                        style={[
+                          styles.suggestionItem,
+                          index === destinationSuggestions.slice(0, 5).length - 1 && styles.suggestionItemLast
+                        ]}
+                        onPress={() => {
+                          console.log('Destination suggestion clicked:', suggestion.description);
+                          setDestinationPoint(suggestion.description);
+                          setShowDestinationSuggestions(false);
+                          setDestinationSuggestions([]);
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.suggestionMainText}>
+                          {suggestion.structured_formatting.main_text}
+                        </Text>
+                        <Text style={styles.suggestionSecondaryText}>
+                          {suggestion.structured_formatting.secondary_text}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              ) : null}
             </View>
+            {arrivalPoint.trim() && destinationPoint.trim() && (
+              <TouchableOpacity
+                style={styles.searchRouteButton}
+                onPress={handleSearchRoute}
+                disabled={isSearchingRoute}
+                activeOpacity={0.8}
+              >
+                {isSearchingRoute ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                    <circle
+                      cx="10"
+                      cy="10"
+                      r="7"
+                      stroke="#FFFFFF"
+                      strokeWidth="2.5"
+                      fill="none"
+                    />
+                    <path
+                      d="M15 15L21 21"
+                      stroke="#FFFFFF"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                )}
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -457,7 +775,16 @@ const styles = StyleSheet.create({
   },
   inputWrapper: {
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    zIndex: 1,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  inputContent: {
+    flex: 1,
   },
   inputLabel: {
     fontSize: 11,
@@ -467,11 +794,100 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontFamily: 'Inter, sans-serif',
   },
+  inputLabelLeft: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#000',
+    letterSpacing: 0.5,
+    fontFamily: 'Inter, sans-serif',
+    marginRight: 12,
+    minWidth: 50,
+  },
   routeInput: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#000',
     fontWeight: '500',
     fontFamily: 'Inter, sans-serif',
+    flex: 1,
+    paddingVertical: 8,
+  },
+  routeInputShorter: {
+    maxWidth: 'calc(100% - 20px)',
+  },
+  suggestionsContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    marginTop: 8,
+    marginHorizontal: 4,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    zIndex: 9999,
+    maxHeight: 280,
+    overflow: 'hidden',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.12)',
+      },
+    }),
+  },
+  suggestionItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+    backgroundColor: '#FFFFFF',
+    transition: 'background-color 0.2s',
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+        ':hover': {
+          backgroundColor: '#F8F8F8',
+        },
+      },
+    }),
+  },
+  suggestionItemLast: {
+    borderBottomWidth: 0,
+  },
+  suggestionMainText: {
+    fontSize: 15,
+    color: '#000000',
+    fontFamily: 'Inter, sans-serif',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  suggestionSecondaryText: {
+    fontSize: 13,
+    color: '#666666',
+    fontFamily: 'Inter, sans-serif',
+    fontWeight: '400',
+  },
+  locationButton: {
+    width: 36,
+    height: 36,
+    backgroundColor: '#06B6D4',
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  searchRouteButton: {
+    position: 'absolute',
+    right: 15,
+    bottom: 15,
+    width: 44,
+    height: 44,
+    backgroundColor: '#000000',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   divider: {
     height: 1,

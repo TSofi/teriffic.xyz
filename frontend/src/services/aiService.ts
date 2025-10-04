@@ -120,3 +120,79 @@ class AIService {
 }
 
 export const aiService = new AIService();
+
+// Geocoding service for address to coordinates
+export async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=AIzaSyBxLcMfFJzbRh-rYmoKs7tgi4JsEumy-Nk`
+    );
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.results.length > 0) {
+      const location = data.results[0].geometry.location;
+      return { lat: location.lat, lng: location.lng };
+    }
+    return null;
+  } catch (error) {
+    console.error('Geocoding error:', error);
+    return null;
+  }
+}
+
+// Reverse geocoding - coordinates to address
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyBxLcMfFJzbRh-rYmoKs7tgi4JsEumy-Nk`
+    );
+    const data = await response.json();
+
+    if (data.status === 'OK' && data.results.length > 0) {
+      return data.results[0].formatted_address;
+    }
+    return null;
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    return null;
+  }
+}
+
+// Route Service (Port 8000)
+const ROUTE_SERVICE_URL = typeof window !== 'undefined'
+  ? (process.env.REACT_APP_ROUTE_SERVICE_URL || 'http://localhost:8000')
+  : 'http://route-service:8000';
+
+export interface RoutePlanRequest {
+  start_latitude: number;
+  start_longitude: number;
+  destination_latitude: number;
+  destination_longitude: number;
+  departure_time: string;
+}
+
+export async function planRoute(request: RoutePlanRequest): Promise<any> {
+  try {
+    console.log('Planning route to:', `${ROUTE_SERVICE_URL}/api/route/plan`);
+    console.log('Request:', request);
+
+    const response = await fetch(`${ROUTE_SERVICE_URL}/api/route/plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Route planning error:', errorText);
+      throw new Error(`Route planning failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    console.log('Route plan response:', data);
+    return data;
+  } catch (error) {
+    console.error('Route planning error:', error);
+    throw error;
+  }
+}

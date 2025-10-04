@@ -1,6 +1,15 @@
 version: '3.8'
 
 services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+    restart: unless-stopped
+
   ai-service:
     build: ./ai-service
     ports:
@@ -32,4 +41,5 @@ services:
       - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
     restart: unless-stopped
     depends_on:
+      - backend
       - ai-service
