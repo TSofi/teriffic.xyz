@@ -604,6 +604,17 @@ export default function MapComponent({
         console.log('Arrival station:', arrivalStation);
         console.log('User end location:', userEndLocation);
 
+        // Extract time information
+        const walkingToStationTime = Math.ceil(routeData.walking_to_departure_time_minutes);
+        const walkingFromStationTime = Math.ceil(routeData.walking_from_arrival_time_minutes);
+        const totalJourneyTime = Math.ceil(routeData.total_journey_time_minutes);
+        const busTime = totalJourneyTime - walkingToStationTime - walkingFromStationTime;
+
+        console.log('Walking to station:', walkingToStationTime, 'min');
+        console.log('Bus travel time:', busTime, 'min');
+        console.log('Walking from station:', walkingFromStationTime, 'min');
+        console.log('Total journey time:', totalJourneyTime, 'min');
+
         // 1. Walking route: User start → First bus station (DASHED BLUE)
         const walkingRenderer1 = new google.maps.DirectionsRenderer({
           map: googleMapRef.current,
