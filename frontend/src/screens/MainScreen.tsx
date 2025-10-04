@@ -225,6 +225,10 @@ export default function MainScreen({ navigation }: Props) {
     navigation.navigate('Rewards');
   };
 
+  const handleTicketsPress = () => {
+    navigation.navigate('Tickets');
+  };
+
   const handleFindMyLocation = async () => {
     if (!navigator.geolocation) {
       alert('Geolocation is not supported by your browser');
@@ -698,6 +702,28 @@ export default function MainScreen({ navigation }: Props) {
                   />
                 </svg>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.ticketsButton}
+                onPress={handleTicketsPress}
+                activeOpacity={0.8}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z"
+                    stroke="#000000"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M9 22V12H15V22"
+                    stroke="#000000"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </TouchableOpacity>
             </View>
           </View>
           )}
@@ -1028,13 +1054,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter, sans-serif',
   },
   rewardsButton: {
-    width: 44,
-    height: 44,
+    width: 50,
+    height: 50,
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 10,
+    marginLeft: 5,
+  },
+  ticketsButton: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 9,
+    marginRight: 0,
   },
   horizontalDivider: {
     height: 1,

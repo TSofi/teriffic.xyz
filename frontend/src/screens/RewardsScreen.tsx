@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -20,7 +21,7 @@ const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
 
 // Mock data
-const provenReports = [
+const initialReports = [
   { id: 1, date: '2025-01-10', bus: '#999', issue: 'Traffic jam on Main St', status: 'Verified' },
   { id: 2, date: '2025-01-09', bus: '#704', issue: 'Road closure', status: 'Verified' },
   { id: 3, date: '2025-01-08', bus: '#111', issue: 'Accident reported', status: 'Verified' },
@@ -30,48 +31,304 @@ const provenReports = [
   { id: 7, date: '2025-01-04', bus: '#999', issue: 'Weather delay', status: 'Verified' },
 ];
 
-const REPORTS_FOR_REWARD = 10;
+// Calculate level from total reports
+const calculateLevel = (totalReports: number): number => {
+  let level = 1;
+  let reportsNeeded = 10;
+  let totalNeeded = 0;
+
+  while (totalReports >= totalNeeded + reportsNeeded) {
+    totalNeeded += reportsNeeded;
+    level++;
+    reportsNeeded = 10 + (level - 1) * 2;
+  }
+
+  return level;
+};
+
+// Calculate reports needed for current level
+const getReportsForLevel = (level: number): number => {
+  return 10 + (level - 1) * 2;
+};
+
+// Calculate total reports needed up to a level
+const getTotalReportsUpToLevel = (level: number): number => {
+  let total = 0;
+  for (let i = 1; i < level; i++) {
+    total += getReportsForLevel(i);
+  }
+  return total;
+};
+
+// Get reward days for level
+const getRewardDays = (level: number): number => {
+  if (level <= 30) return level; // 1-30 days
+  return 30; // Cap at 30 days (1 month)
+};
+
+// Confetti piece component
+const ConfettiPiece = () => {
+  const fallAnim = useRef(new Animated.Value(-20)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const leftPosition = Math.random() * 100; // Random horizontal position
+  const duration = 2000 + Math.random() * 1000; // 2-3 seconds
+  const colors = ['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F'];
+  const color = colors[Math.floor(Math.random() * colors.length)];
+
+  // Mobile frame height is 844px (iOS) + some extra for web
+  const screenHeight = Platform.OS === 'web' && isWeb ? 1250 : 1250;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fallAnim, {
+        toValue: screenHeight,
+        duration: duration,
+        useNativeDriver: true,
+      }),
+      Animated.timing(rotateAnim, {
+        toValue: 360 * (2 + Math.random() * 2),
+        duration: duration,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        left: `${leftPosition}%`,
+        top: 0,
+        width: 10,
+        height: 10,
+        backgroundColor: color,
+        transform: [
+          { translateY: fallAnim },
+          { rotate: rotateAnim.interpolate({
+            inputRange: [0, 360],
+            outputRange: ['0deg', '360deg']
+          })}
+        ],
+      }}
+    />
+  );
+};
 
 export default function RewardsScreen({ navigation }: Props) {
-  const currentProgress = provenReports.length;
-  const progressPercentage = (currentProgress / REPORTS_FOR_REWARD) * 100;
+  const [provenReports, setProvenReports] = useState(initialReports);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [showNotification, setShowNotification] = useState(false);
+  const [showSpark, setShowSpark] = useState(false);
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const notificationAnim = useRef(new Animated.Value(-100)).current;
+  const sparkAnim = useRef(new Animated.Value(0)).current;
+  const prevLevelRef = useRef(1);
+  const prevTotalReportsRef = useRef(initialReports.length);
+
+  const totalReports = provenReports.length;
+  const currentLevel = calculateLevel(totalReports);
+  const rewardDays = getRewardDays(currentLevel);
+
+  // Ticket costs same as reports needed to reach next level
+  // Level 1 → Level 2 = 10 reports, Level 2 → Level 3 = 12 reports, etc.
+  const reportsNeededForTicket = getReportsForLevel(currentLevel);
+  const totalReportsUpToCurrentLevel = getTotalReportsUpToLevel(currentLevel);
+  const currentTicketProgress = totalReports - totalReportsUpToCurrentLevel;
+  const ticketProgressPercentage = (currentTicketProgress / reportsNeededForTicket) * 100;
+
+  // Animate progress bar and detect level up
+  useEffect(() => {
+    // Animate progress bar
+    Animated.timing(progressAnim, {
+      toValue: ticketProgressPercentage,
+      duration: 500,
+      useNativeDriver: false,
+    }).start();
+
+    // Check for level up (ticket earned)
+    if (currentLevel > prevLevelRef.current && totalReports > prevTotalReportsRef.current) {
+      // Show confetti
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
+
+      // Show spark animation
+      setShowSpark(true);
+      Animated.sequence([
+        Animated.timing(sparkAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(sparkAnim, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setShowSpark(false));
+
+      // Show notification
+      setShowNotification(true);
+      Animated.timing(notificationAnim, {
+        toValue: 20,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+
+    prevLevelRef.current = currentLevel;
+    prevTotalReportsRef.current = totalReports;
+  }, [totalReports, ticketProgressPercentage, currentLevel]);
+
+  const handleAddReport = () => {
+    const newReport = {
+      id: provenReports.length + 1,
+      date: new Date().toISOString().split('T')[0],
+      bus: '#999',
+      issue: 'Test report',
+      status: 'Verified',
+    };
+    setProvenReports([newReport, ...provenReports]);
+  };
+
+  const handleClaimTicket = () => {
+    // Hide notification
+    Animated.timing(notificationAnim, {
+      toValue: -100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowNotification(false);
+      // Navigate to tickets page
+      navigation.navigate('Tickets' as any);
+    });
+  };
+
+  const handleDismissNotification = () => {
+    Animated.timing(notificationAnim, {
+      toValue: -100,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => setShowNotification(false));
+  };
 
   return (
     <View style={[styles.webContainer, isWeb && styles.webCentered]}>
       <View style={[styles.container, isWeb && styles.mobileFrame]}>
+        {/* Confetti */}
+        {showConfetti && (
+          <View style={styles.confettiContainer}>
+            {[...Array(50)].map((_, i) => (
+              <ConfettiPiece key={i} />
+            ))}
+          </View>
+        )}
+
+        {/* Claim Ticket Notification */}
+        {showNotification && (
+          <Animated.View
+            style={[
+              styles.notification,
+              { transform: [{ translateY: notificationAnim }] }
+            ]}
+          >
+            <View style={styles.notificationContent}>
+              <Text style={styles.notificationTitle}>🎉 Ticket Earned!</Text>
+              <Text style={styles.notificationText}>
+                You've earned a {rewardDays} {rewardDays === 1 ? 'day' : rewardDays === 30 ? 'month' : 'days'} free pass!
+              </Text>
+              <View style={styles.notificationButtons}>
+                <TouchableOpacity onPress={handleClaimTicket} style={styles.claimButton}>
+                  <Text style={styles.claimButtonText}>Claim Ticket</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleDismissNotification} style={styles.dismissButton}>
+                  <Text style={styles.dismissButtonText}>Later</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Animated.View>
+        )}
+
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Text style={styles.backIcon}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Rewards</Text>
-          <View style={styles.placeholder} />
+          <TouchableOpacity onPress={handleAddReport} style={styles.addButton}>
+            <Text style={styles.addIcon}>+</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {/* Level Badge */}
+          <View style={styles.levelSection}>
+            <View style={styles.levelBadge}>
+              <Text style={styles.levelLabel}>LEVEL</Text>
+              <Text style={styles.levelNumber}>{currentLevel}</Text>
+            </View>
+            <Text style={styles.levelDescription}>
+              {rewardDays} {rewardDays === 1 ? 'Day' : rewardDays === 30 ? 'Month' : 'Days'} Free Pass
+            </Text>
+          </View>
+
           {/* Ticket Progress */}
           <View style={styles.ticketSection}>
             <Text style={styles.progressLabel}>
-              {currentProgress} / {REPORTS_FOR_REWARD} Reports
+              {currentTicketProgress} / {reportsNeededForTicket} Reports
             </Text>
-            <Text style={styles.progressSubtitle}>Complete for 1 Day Free Ticket</Text>
+            <Text style={styles.progressSubtitle}>Next Free Pass Ticket</Text>
 
             {/* Minimalistic Ticket */}
             <View style={styles.ticket}>
               <View style={styles.ticketHole} />
               <View style={styles.ticketContent}>
                 <View style={styles.ticketTop}>
-                  <Text style={styles.ticketTitle}>1 DAY</Text>
+                  <Text style={styles.ticketTitle}>
+                    {rewardDays} {rewardDays === 1 ? 'DAY' : rewardDays === 30 ? 'MONTH' : 'DAYS'}
+                  </Text>
                   <Text style={styles.ticketSubtitle}>FREE PASS</Text>
                 </View>
 
                 {/* Progress Bar */}
                 <View style={styles.progressBarContainer}>
-                  <View style={[styles.progressBarFill, { width: `${progressPercentage}%` }]} />
+                  <Animated.View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: progressAnim.interpolate({
+                          inputRange: [0, 100],
+                          outputRange: ['0%', '100%'],
+                        })
+                      }
+                    ]}
+                  />
+                  {/* Spark effect at end of progress bar */}
+                  {showSpark && (
+                    <Animated.View
+                      style={[
+                        styles.sparkEffect,
+                        {
+                          left: progressAnim.interpolate({
+                            inputRange: [0, 100],
+                            outputRange: ['0%', '100%'],
+                          }),
+                          opacity: sparkAnim,
+                          transform: [
+                            {
+                              scale: sparkAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0.5, 1.5],
+                              })
+                            }
+                          ]
+                        }
+                      ]}
+                    />
+                  )}
                 </View>
 
                 <Text style={styles.ticketProgress}>
-                  {REPORTS_FOR_REWARD - currentProgress} reports to go
+                  {reportsNeededForTicket - currentTicketProgress} reports to go
                 </Text>
               </View>
               <View style={[styles.ticketHole, styles.ticketHoleRight]} />
@@ -109,6 +366,86 @@ export default function RewardsScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  confettiContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    pointerEvents: 'none',
+  },
+  notification: {
+    position: 'absolute',
+    top: 0,
+    left: 20,
+    right: 20,
+    zIndex: 10000,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 15,
+    padding: 20,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  notificationContent: {
+    alignItems: 'center',
+  },
+  notificationTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 8,
+    fontFamily: 'Inter, sans-serif',
+  },
+  notificationText: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 15,
+    fontFamily: 'Inter, sans-serif',
+  },
+  notificationButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  claimButton: {
+    backgroundColor: '#000000',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  claimButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'Inter, sans-serif',
+  },
+  dismissButton: {
+    backgroundColor: '#E0E0E0',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  dismissButtonText: {
+    color: '#666666',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'Inter, sans-serif',
+  },
+  sparkEffect: {
+    position: 'absolute',
+    top: '50%',
+    width: 20,
+    height: 20,
+    marginTop: -10,
+    marginLeft: -10,
+    backgroundColor: '#FFD700',
+    borderRadius: 10,
+    zIndex: 10,
+  },
   webContainer: {
     flex: 1,
     backgroundColor: '#1a1a1a',
@@ -161,8 +498,61 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 40,
   },
+  addButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addIcon: {
+    fontSize: 28,
+    color: '#000000',
+    fontWeight: '300',
+    fontFamily: 'Inter, sans-serif',
+  },
   scrollView: {
     flex: 1,
+  },
+  levelSection: {
+    alignItems: 'center',
+    paddingTop: 20,
+    paddingBottom: 15,
+  },
+  levelBadge: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 50,
+    width: 100,
+    height: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+    elevation: 5,
+    shadowColor: '#FFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  levelLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#666666',
+    letterSpacing: 1,
+    fontFamily: 'Inter, sans-serif',
+  },
+  levelNumber: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#000000',
+    fontFamily: 'Inter, sans-serif',
+  },
+  levelDescription: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+    fontFamily: 'Inter, sans-serif',
   },
   ticketSection: {
     paddingHorizontal: 20,
