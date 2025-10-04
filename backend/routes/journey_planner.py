@@ -283,6 +283,70 @@ async def plan_journey(request: JourneyRequest):
         departure_station_info = route['stations_info'][dep_idx]
         arrival_station_info = route['stations_info'][arr_idx]
 
+        # Calculate average historical delay for this route at this time
+        scheduled_departure = datetime.strptime(departure_station_info["departure_time"], "%Y-%m-%d %H:%M:%S")
+        scheduled_arrival = datetime.strptime(arrival_station_info["arrival_time"], "%Y-%m-%d %H:%M:%S")
+
+        # Get time window (30 minutes before/after scheduled time)
+        time_start = scheduled_departure - timedelta(minutes=30)
+        time_end = scheduled_departure + timedelta(minutes=30)
+
+        # Find historical routes on same line, same stations, similar time
+        historical_delays_departure = []
+        historical_delays_arrival = []
+
+        offset = 0
+        page_size = 1000
+
+        while offset < 5000:  # Limit to first 5000 routes for performance
+            response = supabase.table("routes").select("*").eq("line_number", route['line_number']).range(offset, offset + page_size - 1).execute()
+
+            if not response.data:
+                break
+
+            for hist_route in response.data:
+                hist_stations = hist_route["stations_info"]
+
+                # Find if this historical route has same station pair
+                hist_dep_idx = None
+                hist_arr_idx = None
+
+                for i, station_info in enumerate(hist_stations):
+                    if station_info["station_id"] == departure_result['station']['id'] and hist_dep_idx is None:
+                        hist_dep_idx = i
+                    if station_info["station_id"] == arrival_result['station']['id'] and hist_dep_idx is not None:
+                        hist_arr_idx = i
+                        break
+
+                if hist_dep_idx is not None and hist_arr_idx is not None:
+                    hist_dep_time = datetime.strptime(hist_stations[hist_dep_idx]["departure_time"], "%Y-%m-%d %H:%M:%S")
+
+                    # Check if within time window (same time of day, different dates)
+                    if time_start.time() <= hist_dep_time.time() <= time_end.time():
+                        # Check if actual times exist (past routes only)
+                        if hist_stations[hist_dep_idx]["actual_departure_time"]:
+                            actual_dep = datetime.strptime(hist_stations[hist_dep_idx]["actual_departure_time"], "%Y-%m-%d %H:%M:%S")
+                            scheduled_dep = datetime.strptime(hist_stations[hist_dep_idx]["departure_time"], "%Y-%m-%d %H:%M:%S")
+                            delay = (actual_dep - scheduled_dep).total_seconds() / 60
+                            historical_delays_departure.append(delay)
+
+                        if hist_stations[hist_arr_idx]["actual_arrival_time"]:
+                            actual_arr = datetime.strptime(hist_stations[hist_arr_idx]["actual_arrival_time"], "%Y-%m-%d %H:%M:%S")
+                            scheduled_arr = datetime.strptime(hist_stations[hist_arr_idx]["arrival_time"], "%Y-%m-%d %H:%M:%S")
+                            delay = (actual_arr - scheduled_arr).total_seconds() / 60
+                            historical_delays_arrival.append(delay)
+
+            offset += page_size
+
+        # Calculate averages in seconds (rounded to whole number)
+        avg_departure_delay_min = sum(historical_delays_departure) / len(historical_delays_departure) if historical_delays_departure else 0
+        avg_arrival_delay_min = sum(historical_delays_arrival) / len(historical_delays_arrival) if historical_delays_arrival else 0
+
+        avg_departure_delay_sec = round(avg_departure_delay_min * 60)
+        avg_arrival_delay_sec = round(avg_arrival_delay_min * 60)
+
+        print(f"DEBUG: Historical data - {len(historical_delays_departure)} past departures, avg delay: {avg_departure_delay_sec} sec")
+
         # Get station details
         dep_station = departure_result['station']
         arr_station = arrival_result['station']
@@ -357,7 +421,11 @@ async def plan_journey(request: JourneyRequest):
             walking_from_arrival_distance_km=walking_from_arrival_distance,
 
             total_journey_time_minutes=total_journey_time,
-            total_waiting_time_minutes=best_route['waiting_time_minutes']
+            total_waiting_time_minutes=best_route['waiting_time_minutes'],
+
+            average_departure_delay_seconds=avg_departure_delay_sec,
+            average_arrival_delay_seconds=avg_arrival_delay_sec,
+            historical_sample_size=len(historical_delays_departure)
         )
 
     except HTTPException:

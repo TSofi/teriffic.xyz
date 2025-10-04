@@ -58,6 +58,11 @@ class JourneyResponse(BaseModel):
     total_journey_time_minutes: float
     total_waiting_time_minutes: float  # Time waiting at departure station
 
+    # Historical delay data
+    average_departure_delay_seconds: int  # Average delay at departure station based on past data (rounded seconds)
+    average_arrival_delay_seconds: int    # Average delay at arrival station based on past data (rounded seconds)
+    historical_sample_size: int           # Number of past routes used for delay calculation
+
 
 class JourneyError(BaseModel):
     """Error response"""
