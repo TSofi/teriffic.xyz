@@ -14,10 +14,10 @@ class LLMService:
     """Service for LLM interactions with tool calling support."""
 
     def __init__(self, db_service):
-        """Initialize LLM service with OpenRouter client."""
+        """Initialize LLM service with OpenAI client."""
         self.client = AsyncOpenAI(
-            api_key=settings.openrouter_api_key,
-            base_url=settings.openrouter_base_url
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url
         )
         self.tool_executor = ToolExecutor(db_service)
         self.model = settings.model_name
@@ -53,11 +53,7 @@ class LLMService:
                     tool_choice="auto",
                     temperature=settings.temperature,
                     max_tokens=settings.max_tokens,
-                    top_p=settings.top_p,
-                    extra_headers={
-                        "HTTP-Referer": "https://bus-tracker-ai",
-                        "X-Title": "Bus Tracker AI Assistant"
-                    }
+                    top_p=settings.top_p
                 )
 
                 assistant_message = response.choices[0].message
@@ -169,24 +165,26 @@ class LLMService:
         """Build system prompt for bus tracking assistant."""
         return """You are a helpful AI assistant for a real-time bus tracking system.
 
-Your role is to help users understand the current status of bus lines, delays, and service issues.
+Your role is to help users both CHECK bus status and REPORT delays/issues.
 
-When users ask about a bus line:
-1. Use the get_bus_line_status tool to get current information
-2. Check for recent reports using get_recent_reports if needed
-3. Look for service alerts using check_service_alerts
-4. Suggest alternatives if there are severe delays using get_alternative_routes
+When users ASK about a bus (e.g., "How is bus 999 at station XXX?"):
+- Use get_bus_status tool with bus_number and station_id
+- bus_number is the specific bus (e.g., "999")
+- route is the optional line name (if mentioned)
+- Provide delay information from recent reports (last hour)
+- Be concise and factual
+
+When users REPORT a delay/issue (e.g., "Bus 999 is delayed at station XXX"):
+- Use report_bus_delay tool to record the report
+- Extract: bus_number (e.g., "999"), station_id, status (delayed/on_time/cancelled/crowded)
+- Extract delay in minutes if mentioned
+- Extract route/line name if mentioned (optional)
+- Confirm the report was recorded
 
 Always:
 - Be concise and helpful
-- Provide specific delay information when available
-- Mention if information is from user reports (community-sourced) or official data
-- Suggest alternatives when there are problems
 - Use friendly, conversational language
 - If you don't have data, say so clearly
-
-Examples of good responses:
-- "Bus line 999 is currently running with minor delays of about 5 minutes. There are 3 active buses on the route."
-- "I'm seeing several reports of delays on line 100. Users report 10-15 minute delays due to heavy traffic downtown. Would you like to see alternative routes?"
-- "I don't have any recent data for line 999. It may not be currently active, or there might be a service disruption."
+- Do NOT ask follow-up questions unless needed to clarify bus/station
+- Information comes from community reports (last hour only)
 """

@@ -13,7 +13,9 @@ from .models import (
     ChatResponse,
     SimpleQueryRequest,
     HealthResponse,
-    ToolCall
+    ToolCall,
+    TranscribeRequest,
+    TranscribeResponse
 )
 from .llm_service import LLMService
 from .db_service import DatabaseService
@@ -101,6 +103,50 @@ async def health_check():
 async def get_stats():
     """Get conversation manager statistics."""
     return await conversation_manager.get_stats()
+
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_audio(request: TranscribeRequest):
+    """
+    Transcribe base64 encoded audio to text using OpenAI Whisper.
+    """
+    try:
+        import base64
+        import tempfile
+        import os
+        from openai import AsyncOpenAI
+
+        # Decode base64 audio
+        audio_data = base64.b64decode(request.audio_base64)
+
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.m4a') as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_file_path = tmp_file.name
+
+        # Transcribe using Whisper
+        client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url
+        )
+
+        with open(tmp_file_path, 'rb') as audio_file:
+            transcription = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+
+        # Clean up temp file
+        os.unlink(tmp_file_path)
+
+        return TranscribeResponse(
+            text=transcription.text,
+            success=True
+        )
+
+    except Exception as e:
+        logger.error(f"Error transcribing audio: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -248,6 +294,7 @@ async def root():
             "stats": "/stats",
             "chat": "/chat",
             "simple_query": "/query",
+            "transcribe": "/transcribe",
             "docs": "/docs"
         }
     }

@@ -52,3 +52,14 @@ class ConversationHistory(BaseModel):
     messages: List[Message]
     created_at: datetime
     updated_at: datetime
+
+
+class TranscribeRequest(BaseModel):
+    """Request model for audio transcription."""
+    audio_base64: str = Field(..., description="Base64 encoded audio file")
+
+
+class TranscribeResponse(BaseModel):
+    """Response model for audio transcription."""
+    text: str = Field(..., description="Transcribed text")
+    success: bool = Field(..., description="Success status")

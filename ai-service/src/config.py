@@ -6,10 +6,10 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings."""
 
-    # OpenRouter Configuration
-    openrouter_api_key: str
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    model_name: str = "google/gemma-2-27b-it"
+    # OpenAI Configuration
+    openai_api_key: str
+    openai_base_url: str = "https://api.openai.com/v1"
+    model_name: str = "gpt-4o-mini"
 
     # Supabase Configuration
     supabase_url: str
