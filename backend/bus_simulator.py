@@ -11,8 +11,9 @@ async def simulate_bus_movements():
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Simulating bus movements...")
 
             current_time = datetime.now()
+            today_date = current_time.strftime("%Y-%m-%d")
 
-            # Fetch routes with pagination
+            # Fetch ONLY today's routes to reduce load
             all_routes = []
             page_size = 1000
             offset = 0
@@ -24,11 +25,19 @@ async def simulate_bus_movements():
                 if not routes_batch:
                     break
 
-                all_routes.extend(routes_batch)
+                # Filter to only routes happening today
+                for route in routes_batch:
+                    if route["stations_info"] and len(route["stations_info"]) > 0:
+                        first_departure = route["stations_info"][0]["departure_time"]
+                        if first_departure.startswith(today_date):
+                            all_routes.append(route)
+
                 offset += page_size
 
                 if len(routes_batch) < page_size:
                     break
+
+            print(f"  Found {len(all_routes)} routes for today ({today_date})")
 
             routes_updated = 0
 
