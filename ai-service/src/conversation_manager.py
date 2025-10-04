@@ -3,25 +3,24 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import uuid
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, delete, select
+from supabase import Client
 import json
 
 logger = logging.getLogger(__name__)
 
 
 class ConversationManager:
-    """Manage conversation history using Supabase PostgreSQL."""
+    """Manage conversation history using Supabase client."""
 
-    def __init__(self, db_service, ttl_hours: int = 24):
+    def __init__(self, supabase_client: Client, ttl_hours: int = 24):
         """
         Initialize conversation manager.
 
         Args:
-            db_service: Database service instance
+            supabase_client: Supabase client instance
             ttl_hours: Time to live for conversations in hours
         """
-        self.db = db_service
+        self.client = supabase_client
         self.ttl_hours = ttl_hours
         self._cleanup_task = None
 
@@ -56,70 +55,46 @@ class ConversationManager:
     async def create_conversation(self, user_id: Optional[str] = None) -> str:
         """Create a new conversation and return ID."""
         conversation_id = str(uuid.uuid4())
+        expires_at = (datetime.now() + timedelta(hours=self.ttl_hours)).isoformat()
 
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    INSERT INTO ai_conversations (conversation_id, user_id, expires_at)
-                    VALUES (:conversation_id, :user_id, NOW() + INTERVAL ':ttl_hours hours')
-                    RETURNING conversation_id
-                """)
+        try:
+            self.client.table('ai_conversations').insert({
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "expires_at": expires_at
+            }).execute()
 
-                result = await session.execute(
-                    query,
-                    {
-                        "conversation_id": conversation_id,
-                        "user_id": user_id,
-                        "ttl_hours": self.ttl_hours
-                    }
-                )
-                await session.commit()
+            return conversation_id
 
-                return conversation_id
-
-            except Exception as e:
-                logger.error(f"Error creating conversation: {e}")
-                await session.rollback()
-                raise
+        except Exception as e:
+            logger.error(f"Error creating conversation: {e}")
+            raise
 
     async def get_conversation(self, conversation_id: str) -> Optional[Dict]:
         """Get conversation by ID."""
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    SELECT
-                        conversation_id,
-                        user_id,
-                        metadata,
-                        created_at,
-                        updated_at,
-                        expires_at
-                    FROM ai_conversations
-                    WHERE conversation_id = :conversation_id
-                        AND expires_at > NOW()
-                """)
+        try:
+            response = self.client.table('ai_conversations')\
+                .select('*')\
+                .eq('conversation_id', conversation_id)\
+                .gt('expires_at', datetime.now().isoformat())\
+                .execute()
 
-                result = await session.execute(
-                    query,
-                    {"conversation_id": conversation_id}
-                )
-                row = result.fetchone()
-
-                if not row:
-                    return None
-
-                return {
-                    "id": row[0],
-                    "user_id": row[1],
-                    "metadata": row[2] or {},
-                    "created_at": row[3],
-                    "updated_at": row[4],
-                    "expires_at": row[5]
-                }
-
-            except Exception as e:
-                logger.error(f"Error getting conversation: {e}")
+            if not response.data:
                 return None
+
+            conv = response.data[0]
+            return {
+                "id": conv["conversation_id"],
+                "user_id": conv.get("user_id"),
+                "metadata": conv.get("metadata", {}),
+                "created_at": conv["created_at"],
+                "updated_at": conv["updated_at"],
+                "expires_at": conv["expires_at"]
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting conversation: {e}")
+            return None
 
     async def add_message(
         self,
@@ -129,49 +104,30 @@ class ConversationManager:
         metadata: Optional[Dict] = None
     ) -> bool:
         """Add a message to conversation."""
-        async with self.db.async_session() as session:
-            try:
-                # Check if conversation exists, create if not
-                conv = await self.get_conversation(conversation_id)
-                if not conv:
-                    # Create conversation first
-                    create_conv_query = text("""
-                        INSERT INTO ai_conversations (conversation_id, expires_at)
-                        VALUES (:conversation_id, NOW() + INTERVAL ':ttl_hours hours')
-                        ON CONFLICT (conversation_id) DO NOTHING
-                    """)
-                    await session.execute(
-                        create_conv_query,
-                        {
-                            "conversation_id": conversation_id,
-                            "ttl_hours": self.ttl_hours
-                        }
-                    )
+        try:
+            # Check if conversation exists, create if not
+            conv = await self.get_conversation(conversation_id)
+            if not conv:
+                # Create conversation first
+                expires_at = (datetime.now() + timedelta(hours=self.ttl_hours)).isoformat()
+                self.client.table('ai_conversations').insert({
+                    "conversation_id": conversation_id,
+                    "expires_at": expires_at
+                }).execute()
 
-                # Add message
-                query = text("""
-                    INSERT INTO ai_conversation_messages
-                    (conversation_id, role, content, metadata)
-                    VALUES (:conversation_id, :role, :content, :metadata)
-                """)
+            # Add message
+            self.client.table('ai_conversation_messages').insert({
+                "conversation_id": conversation_id,
+                "role": role,
+                "content": content,
+                "metadata": metadata or {}
+            }).execute()
 
-                await session.execute(
-                    query,
-                    {
-                        "conversation_id": conversation_id,
-                        "role": role,
-                        "content": content,
-                        "metadata": json.dumps(metadata or {})
-                    }
-                )
+            return True
 
-                await session.commit()
-                return True
-
-            except Exception as e:
-                logger.error(f"Error adding message: {e}")
-                await session.rollback()
-                return False
+        except Exception as e:
+            logger.error(f"Error adding message: {e}")
+            return False
 
     async def get_messages(
         self,
@@ -179,151 +135,129 @@ class ConversationManager:
         limit: Optional[int] = None
     ) -> List[Dict]:
         """Get conversation messages."""
-        async with self.db.async_session() as session:
-            try:
-                limit_clause = f"LIMIT {limit}" if limit else ""
+        try:
+            query = self.client.table('ai_conversation_messages')\
+                .select('*')\
+                .eq('conversation_id', conversation_id)\
+                .order('created_at', desc=False)
 
-                query = text(f"""
-                    SELECT
-                        role,
-                        content,
-                        metadata,
-                        created_at
-                    FROM ai_conversation_messages
-                    WHERE conversation_id = :conversation_id
-                    ORDER BY created_at ASC
-                    {limit_clause}
-                """)
+            if limit:
+                query = query.limit(limit)
 
-                result = await session.execute(
-                    query,
-                    {"conversation_id": conversation_id}
-                )
+            response = query.execute()
 
-                messages = []
-                for row in result.fetchall():
-                    messages.append({
-                        "role": row[0],
-                        "content": row[1],
-                        "metadata": row[2] or {},
-                        "timestamp": row[3].isoformat() if row[3] else None
-                    })
+            messages = []
+            for msg in response.data or []:
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "metadata": msg.get("metadata", {}),
+                    "timestamp": msg["created_at"]
+                })
 
-                # Apply limit after fetch if needed (get last N messages)
-                if limit and len(messages) > limit:
-                    messages = messages[-limit:]
+            # Get last N messages if limit specified
+            if limit and len(messages) > limit:
+                messages = messages[-limit:]
 
-                return messages
+            return messages
 
-            except Exception as e:
-                logger.error(f"Error getting messages: {e}")
-                return []
+        except Exception as e:
+            logger.error(f"Error getting messages: {e}")
+            return []
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """Delete a conversation."""
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    DELETE FROM ai_conversations
-                    WHERE conversation_id = :conversation_id
-                """)
+        try:
+            self.client.table('ai_conversations')\
+                .delete()\
+                .eq('conversation_id', conversation_id)\
+                .execute()
 
-                result = await session.execute(
-                    query,
-                    {"conversation_id": conversation_id}
-                )
-                await session.commit()
+            return True
 
-                return result.rowcount > 0
-
-            except Exception as e:
-                logger.error(f"Error deleting conversation: {e}")
-                await session.rollback()
-                return False
+        except Exception as e:
+            logger.error(f"Error deleting conversation: {e}")
+            return False
 
     async def cleanup_expired(self) -> int:
         """Remove expired conversations. Returns count of removed conversations."""
-        async with self.db.async_session() as session:
-            try:
-                # Use the stored function
-                query = text("SELECT cleanup_expired_conversations()")
-                result = await session.execute(query)
-                await session.commit()
+        try:
+            # Get expired conversations
+            response = self.client.table('ai_conversations')\
+                .select('conversation_id')\
+                .lt('expires_at', datetime.now().isoformat())\
+                .execute()
 
-                removed_count = result.scalar()
+            expired_ids = [c['conversation_id'] for c in response.data or []]
 
-                if removed_count and removed_count > 0:
-                    logger.info(f"Cleaned up {removed_count} expired conversations")
-
-                return removed_count or 0
-
-            except Exception as e:
-                logger.error(f"Error cleaning up conversations: {e}")
-                await session.rollback()
+            if not expired_ids:
                 return 0
+
+            # Delete expired conversations (messages will cascade delete)
+            self.client.table('ai_conversations')\
+                .delete()\
+                .in_('conversation_id', expired_ids)\
+                .execute()
+
+            removed_count = len(expired_ids)
+
+            if removed_count > 0:
+                logger.info(f"Cleaned up {removed_count} expired conversations")
+
+            return removed_count
+
+        except Exception as e:
+            logger.error(f"Error cleaning up conversations: {e}")
+            return 0
 
     async def extend_ttl(self, conversation_id: str, hours: int = None) -> bool:
         """Extend conversation TTL."""
         hours = hours or self.ttl_hours
+        new_expires_at = (datetime.now() + timedelta(hours=hours)).isoformat()
 
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    UPDATE ai_conversations
-                    SET expires_at = NOW() + INTERVAL ':hours hours'
-                    WHERE conversation_id = :conversation_id
-                """)
+        try:
+            self.client.table('ai_conversations')\
+                .update({"expires_at": new_expires_at})\
+                .eq('conversation_id', conversation_id)\
+                .execute()
 
-                result = await session.execute(
-                    query,
-                    {"conversation_id": conversation_id, "hours": hours}
-                )
-                await session.commit()
+            return True
 
-                return result.rowcount > 0
-
-            except Exception as e:
-                logger.error(f"Error extending TTL: {e}")
-                await session.rollback()
-                return False
+        except Exception as e:
+            logger.error(f"Error extending TTL: {e}")
+            return False
 
     async def get_stats(self) -> Dict:
         """Get conversation manager statistics."""
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    SELECT
-                        COUNT(DISTINCT c.conversation_id) as total_conversations,
-                        COUNT(m.id) as total_messages,
-                        COUNT(DISTINCT CASE WHEN c.expires_at < NOW() THEN c.conversation_id END) as expired_conversations
-                    FROM ai_conversations c
-                    LEFT JOIN ai_conversation_messages m ON c.conversation_id = m.conversation_id
-                """)
+        try:
+            # Get total conversations
+            conv_response = self.client.table('ai_conversations').select('conversation_id', count='exact').execute()
+            total_conversations = conv_response.count or 0
 
-                result = await session.execute(query)
-                row = result.fetchone()
+            # Get total messages
+            msg_response = self.client.table('ai_conversation_messages').select('id', count='exact').execute()
+            total_messages = msg_response.count or 0
 
-                if row:
-                    return {
-                        "total_conversations": row[0] or 0,
-                        "total_messages": row[1] or 0,
-                        "expired_conversations": row[2] or 0,
-                        "ttl_hours": self.ttl_hours
-                    }
+            # Get expired conversations
+            expired_response = self.client.table('ai_conversations')\
+                .select('conversation_id', count='exact')\
+                .lt('expires_at', datetime.now().isoformat())\
+                .execute()
+            expired_conversations = expired_response.count or 0
 
-                return {
-                    "total_conversations": 0,
-                    "total_messages": 0,
-                    "expired_conversations": 0,
-                    "ttl_hours": self.ttl_hours
-                }
+            return {
+                "total_conversations": total_conversations,
+                "total_messages": total_messages,
+                "expired_conversations": expired_conversations,
+                "ttl_hours": self.ttl_hours
+            }
 
-            except Exception as e:
-                logger.error(f"Error getting stats: {e}")
-                return {
-                    "error": str(e),
-                    "ttl_hours": self.ttl_hours
-                }
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return {
+                "error": str(e),
+                "ttl_hours": self.ttl_hours
+            }
 
     async def get_user_conversations(
         self,
@@ -331,42 +265,30 @@ class ConversationManager:
         limit: int = 10
     ) -> List[Dict]:
         """Get all conversations for a user."""
-        async with self.db.async_session() as session:
-            try:
-                query = text("""
-                    SELECT
-                        conversation_id,
-                        created_at,
-                        updated_at,
-                        expires_at,
-                        metadata
-                    FROM ai_conversations
-                    WHERE user_id = :user_id
-                        AND expires_at > NOW()
-                    ORDER BY updated_at DESC
-                    LIMIT :limit
-                """)
+        try:
+            response = self.client.table('ai_conversations')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .gt('expires_at', datetime.now().isoformat())\
+                .order('updated_at', desc=True)\
+                .limit(limit)\
+                .execute()
 
-                result = await session.execute(
-                    query,
-                    {"user_id": user_id, "limit": limit}
-                )
+            conversations = []
+            for conv in response.data or []:
+                conversations.append({
+                    "conversation_id": conv["conversation_id"],
+                    "created_at": conv["created_at"],
+                    "updated_at": conv["updated_at"],
+                    "expires_at": conv["expires_at"],
+                    "metadata": conv.get("metadata", {})
+                })
 
-                conversations = []
-                for row in result.fetchall():
-                    conversations.append({
-                        "conversation_id": row[0],
-                        "created_at": row[1].isoformat() if row[1] else None,
-                        "updated_at": row[2].isoformat() if row[2] else None,
-                        "expires_at": row[3].isoformat() if row[3] else None,
-                        "metadata": row[4] or {}
-                    })
+            return conversations
 
-                return conversations
-
-            except Exception as e:
-                logger.error(f"Error getting user conversations: {e}")
-                return []
+        except Exception as e:
+            logger.error(f"Error getting user conversations: {e}")
+            return []
 
     def format_for_llm(self, messages: List[Dict]) -> List[Dict[str, str]]:
         """Format messages for LLM API."""

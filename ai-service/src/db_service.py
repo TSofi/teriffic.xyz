@@ -1,66 +1,57 @@
-"""Database service for querying bus line data."""
+"""Database service using Supabase client."""
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
+from supabase import create_client, Client
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """Service for database operations."""
+    """Service for database operations using Supabase client."""
 
-    def __init__(self, database_url: str):
-        """Initialize database connection."""
-        self.engine = create_async_engine(database_url, echo=False)
-        self.async_session = sessionmaker(
-            self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False
-        )
+    def __init__(self, supabase_url: str, supabase_key: str):
+        """Initialize Supabase client."""
+        self.client: Client = create_client(supabase_url, supabase_key)
+        logger.info(f"Supabase client initialized for {supabase_url}")
 
     async def get_line_status(self, line_number: str) -> Optional[Dict[str, Any]]:
         """Get current operational status for a bus line."""
-        async with self.async_session() as session:
-            try:
-                # This is a placeholder query - adjust based on your actual schema
-                query = text("""
-                    SELECT
-                        bl.line_number,
-                        bl.operational_status,
-                        COUNT(DISTINCT b.id) as active_buses,
-                        AVG(CASE WHEN b.delay_minutes > 0 THEN b.delay_minutes ELSE 0 END) as avg_delay,
-                        MAX(b.crowding_level) as crowding_level,
-                        MAX(b.last_updated) as last_updated
-                    FROM bus_lines bl
-                    LEFT JOIN buses b ON bl.id = b.line_id
-                    WHERE bl.line_number = :line_number
-                        AND (b.last_updated > NOW() - INTERVAL '30 minutes' OR b.last_updated IS NULL)
-                    GROUP BY bl.line_number, bl.operational_status
-                """)
+        try:
+            # Get line info
+            line_response = self.client.table('bus_lines').select('*').eq('line_number', line_number).execute()
 
-                result = await session.execute(
-                    query,
-                    {"line_number": line_number}
-                )
-                row = result.fetchone()
-
-                if not row:
-                    return None
-
-                return {
-                    "line_number": row[0],
-                    "operational_status": row[1] or "operational",
-                    "active_buses": row[2] or 0,
-                    "avg_delay": float(row[3] or 0),
-                    "crowding_level": row[4] or "normal",
-                    "last_updated": row[5].isoformat() if row[5] else datetime.now().isoformat()
-                }
-            except Exception as e:
-                logger.error(f"Error fetching line status: {e}")
+            if not line_response.data:
                 return None
+
+            line = line_response.data[0]
+
+            # Get active buses for this line
+            buses_response = self.client.table('buses')\
+                .select('*')\
+                .eq('line_id', line['id'])\
+                .gte('last_updated', (datetime.now() - timedelta(minutes=30)).isoformat())\
+                .execute()
+
+            buses = buses_response.data or []
+
+            # Calculate statistics
+            active_buses = len(buses)
+            avg_delay = sum(b.get('delay_minutes', 0) for b in buses) / max(active_buses, 1)
+            max_crowding = max((b.get('crowding_level', 'normal') for b in buses), default='normal')
+
+            return {
+                "line_number": line_number,
+                "operational_status": line.get("operational_status", "operational"),
+                "active_buses": active_buses,
+                "avg_delay": float(avg_delay),
+                "crowding_level": max_crowding,
+                "last_updated": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching line status: {e}")
+            return None
 
     async def get_recent_reports(
         self,
@@ -68,46 +59,42 @@ class DatabaseService:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """Get recent user reports for a line."""
-        async with self.async_session() as session:
-            try:
-                query = text("""
-                    SELECT
-                        r.type,
-                        r.description,
-                        r.severity,
-                        r.created_at as timestamp,
-                        r.verified,
-                        COUNT(rv.id) as upvotes
-                    FROM reports r
-                    JOIN buses b ON r.bus_id = b.id
-                    JOIN bus_lines bl ON b.line_id = bl.id
-                    LEFT JOIN report_votes rv ON r.id = rv.report_id AND rv.vote_type = 'helpful'
-                    WHERE bl.line_number = :line_number
-                        AND r.created_at > NOW() - INTERVAL '6 hours'
-                    GROUP BY r.id, r.type, r.description, r.severity, r.created_at, r.verified
-                    ORDER BY r.created_at DESC
-                    LIMIT :limit
-                """)
+        try:
+            # Get line ID first
+            line_response = self.client.table('bus_lines').select('id').eq('line_number', line_number).execute()
 
-                result = await session.execute(
-                    query,
-                    {"line_number": line_number, "limit": limit}
-                )
-
-                return [
-                    {
-                        "type": row[0],
-                        "description": row[1],
-                        "severity": row[2],
-                        "timestamp": row[3].isoformat(),
-                        "verified": row[4],
-                        "upvotes": row[5]
-                    }
-                    for row in result.fetchall()
-                ]
-            except Exception as e:
-                logger.error(f"Error fetching recent reports: {e}")
+            if not line_response.data:
                 return []
+
+            line_id = line_response.data[0]['id']
+
+            # Get recent reports
+            six_hours_ago = (datetime.now() - timedelta(hours=6)).isoformat()
+
+            reports_response = self.client.table('reports')\
+                .select('*, buses!inner(line_id), report_votes(count)')\
+                .eq('buses.line_id', line_id)\
+                .gte('created_at', six_hours_ago)\
+                .order('created_at', desc=True)\
+                .limit(limit)\
+                .execute()
+
+            reports = []
+            for r in reports_response.data or []:
+                reports.append({
+                    "type": r.get("type"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                    "timestamp": r.get("created_at"),
+                    "verified": r.get("verified", False),
+                    "upvotes": len(r.get("report_votes", []))
+                })
+
+            return reports
+
+        except Exception as e:
+            logger.error(f"Error fetching recent reports: {e}")
+            return []
 
     async def get_delay_statistics(
         self,
@@ -120,40 +107,49 @@ class DatabaseService:
         }
         hours = time_mapping.get(time_range, 6)
 
-        async with self.async_session() as session:
-            try:
-                query = text("""
-                    SELECT
-                        AVG(b.delay_minutes) as avg_delay,
-                        MAX(b.delay_minutes) as max_delay,
-                        MIN(b.delay_minutes) as min_delay,
-                        COUNT(*) as total_delays,
-                        (COUNT(CASE WHEN b.delay_minutes <= 2 THEN 1 END) * 100.0 / COUNT(*)) as on_time_percentage
-                    FROM bus_positions b
-                    JOIN bus_lines bl ON b.line_id = bl.id
-                    WHERE bl.line_number = :line_number
-                        AND b.timestamp > NOW() - INTERVAL ':hours hours'
-                """)
+        try:
+            # Get line ID
+            line_response = self.client.table('bus_lines').select('id').eq('line_number', line_number).execute()
 
-                result = await session.execute(
-                    query,
-                    {"line_number": line_number, "hours": hours}
-                )
-                row = result.fetchone()
-
-                if not row:
-                    return {}
-
-                return {
-                    "avg_delay": float(row[0] or 0),
-                    "max_delay": float(row[1] or 0),
-                    "min_delay": float(row[2] or 0),
-                    "total_delays": row[3] or 0,
-                    "on_time_percentage": float(row[4] or 100)
-                }
-            except Exception as e:
-                logger.error(f"Error fetching delay statistics: {e}")
+            if not line_response.data:
                 return {}
+
+            line_id = line_response.data[0]['id']
+
+            # Get positions within time range
+            time_ago = (datetime.now() - timedelta(hours=hours)).isoformat()
+
+            positions_response = self.client.table('bus_positions')\
+                .select('delay_minutes')\
+                .eq('line_id', line_id)\
+                .gte('timestamp', time_ago)\
+                .execute()
+
+            positions = positions_response.data or []
+
+            if not positions:
+                return {
+                    "avg_delay": 0,
+                    "max_delay": 0,
+                    "min_delay": 0,
+                    "total_delays": 0,
+                    "on_time_percentage": 100
+                }
+
+            delays = [p['delay_minutes'] for p in positions]
+            on_time = sum(1 for d in delays if d <= 2)
+
+            return {
+                "avg_delay": sum(delays) / len(delays),
+                "max_delay": max(delays),
+                "min_delay": min(delays),
+                "total_delays": len(delays),
+                "on_time_percentage": (on_time / len(delays)) * 100
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching delay statistics: {e}")
+            return {}
 
     async def get_reports(
         self,
@@ -162,98 +158,83 @@ class DatabaseService:
         limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Get reports with optional type filtering."""
-        async with self.async_session() as session:
-            try:
-                type_filter = ""
-                if report_types:
-                    type_filter = f"AND r.type IN ({','.join([f\"'{t}'\" for t in report_types])})"
+        try:
+            # Get line ID
+            line_response = self.client.table('bus_lines').select('id').eq('line_number', line_number).execute()
 
-                query = text(f"""
-                    SELECT
-                        r.type,
-                        r.description,
-                        r.severity,
-                        r.created_at as timestamp,
-                        r.verified,
-                        COUNT(rv.id) as upvotes
-                    FROM reports r
-                    JOIN buses b ON r.bus_id = b.id
-                    JOIN bus_lines bl ON b.line_id = bl.id
-                    LEFT JOIN report_votes rv ON r.id = rv.report_id AND rv.vote_type = 'helpful'
-                    WHERE bl.line_number = :line_number
-                        {type_filter}
-                    GROUP BY r.id
-                    ORDER BY r.created_at DESC
-                    LIMIT :limit
-                """)
-
-                result = await session.execute(
-                    query,
-                    {"line_number": line_number, "limit": limit}
-                )
-
-                return [
-                    {
-                        "type": row[0],
-                        "description": row[1],
-                        "severity": row[2],
-                        "timestamp": row[3].isoformat(),
-                        "verified": row[4],
-                        "upvotes": row[5]
-                    }
-                    for row in result.fetchall()
-                ]
-            except Exception as e:
-                logger.error(f"Error fetching reports: {e}")
+            if not line_response.data:
                 return []
+
+            line_id = line_response.data[0]['id']
+
+            # Build query
+            query = self.client.table('reports')\
+                .select('*, buses!inner(line_id), report_votes(count)')\
+                .eq('buses.line_id', line_id)\
+                .order('created_at', desc=True)\
+                .limit(limit)
+
+            # Add type filter if specified
+            if report_types:
+                query = query.in_('type', report_types)
+
+            reports_response = query.execute()
+
+            reports = []
+            for r in reports_response.data or []:
+                reports.append({
+                    "type": r.get("type"),
+                    "description": r.get("description"),
+                    "severity": r.get("severity"),
+                    "timestamp": r.get("created_at"),
+                    "verified": r.get("verified", False),
+                    "upvotes": len(r.get("report_votes", []))
+                })
+
+            return reports
+
+        except Exception as e:
+            logger.error(f"Error fetching reports: {e}")
+            return []
 
     async def get_service_alerts(
         self,
         line_number: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get active service alerts."""
-        async with self.async_session() as session:
-            try:
-                line_filter = ""
-                params = {}
+        try:
+            query = self.client.table('service_alerts')\
+                .select('*')\
+                .lte('start_time', datetime.now().isoformat())\
+                .order('severity', desc=True)\
+                .order('start_time', desc=True)
 
-                if line_number:
-                    line_filter = "AND (sa.line_number = :line_number OR sa.line_number IS NULL)"
-                    params["line_number"] = line_number
+            # Filter by line if specified
+            if line_number:
+                query = query.or_(f'line_number.eq.{line_number},line_number.is.null')
 
-                query = text(f"""
-                    SELECT
-                        sa.type,
-                        sa.title,
-                        sa.description,
-                        sa.severity,
-                        sa.start_time,
-                        sa.end_time,
-                        sa.affected_stops
-                    FROM service_alerts sa
-                    WHERE sa.start_time <= NOW()
-                        AND (sa.end_time IS NULL OR sa.end_time >= NOW())
-                        {line_filter}
-                    ORDER BY sa.severity DESC, sa.start_time DESC
-                """)
+            # Only active alerts (end_time is null or in future)
+            alerts_response = query.execute()
 
-                result = await session.execute(query, params)
+            alerts = []
+            for a in alerts_response.data or []:
+                end_time = a.get('end_time')
+                if end_time is None or datetime.fromisoformat(end_time.replace('Z', '+00:00')) >= datetime.now():
+                    alerts.append({
+                        "type": a.get("type"),
+                        "title": a.get("title"),
+                        "description": a.get("description"),
+                        "severity": a.get("severity"),
+                        "start_time": a.get("start_time"),
+                        "end_time": end_time,
+                        "affected_stops": a.get("affected_stops", [])
+                    })
 
-                return [
-                    {
-                        "type": row[0],
-                        "title": row[1],
-                        "description": row[2],
-                        "severity": row[3],
-                        "start_time": row[4].isoformat(),
-                        "end_time": row[5].isoformat() if row[5] else None,
-                        "affected_stops": row[6] or []
-                    }
-                    for row in result.fetchall()
-                ]
-            except Exception as e:
-                logger.error(f"Error fetching service alerts: {e}")
-                return []
+            return alerts
+
+        except Exception as e:
+            logger.error(f"Error fetching service alerts: {e}")
+            return []
 
     async def get_alternative_routes(
         self,
@@ -262,37 +243,27 @@ class DatabaseService:
         destination_stop: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Get alternative routes."""
-        async with self.async_session() as session:
-            try:
-                # Simplified query - real implementation would use routing algorithms
-                query = text("""
-                    SELECT
-                        bl.line_number,
-                        30 as estimated_time,
-                        1 as transfers,
-                        5.0 as distance,
-                        bl.operational_status as status
-                    FROM bus_lines bl
-                    WHERE bl.line_number != :line_number
-                        AND bl.operational_status = 'operational'
-                    LIMIT 3
-                """)
+        try:
+            # Get operational lines (excluding the affected line)
+            routes_response = self.client.table('bus_lines')\
+                .select('*')\
+                .neq('line_number', line_number)\
+                .eq('operational_status', 'operational')\
+                .limit(3)\
+                .execute()
 
-                result = await session.execute(
-                    query,
-                    {"line_number": line_number}
-                )
+            alternatives = []
+            for route in routes_response.data or []:
+                alternatives.append({
+                    "line_number": route.get("line_number"),
+                    "estimated_time": 30,  # Placeholder - would need routing logic
+                    "transfers": 1,
+                    "distance": 5.0,
+                    "status": route.get("operational_status", "operational")
+                })
 
-                return [
-                    {
-                        "line_number": row[0],
-                        "estimated_time": row[1],
-                        "transfers": row[2],
-                        "distance": row[3],
-                        "status": row[4]
-                    }
-                    for row in result.fetchall()
-                ]
-            except Exception as e:
-                logger.error(f"Error fetching alternative routes: {e}")
-                return []
+            return alternatives
+
+        except Exception as e:
+            logger.error(f"Error fetching alternative routes: {e}")
+            return []
