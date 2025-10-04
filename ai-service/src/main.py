@@ -1,10 +1,11 @@
 """FastAPI main application for AI microservice."""
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import uuid
 from typing import Optional
+from supabase import create_client, Client
 
 from .config import get_settings
 from .models import (
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Global services
+supabase_client: Optional[Client] = None
 db_service: Optional[DatabaseService] = None
 llm_service: Optional[LLMService] = None
 conversation_manager: Optional[ConversationManager] = None
@@ -36,15 +38,20 @@ conversation_manager: Optional[ConversationManager] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global db_service, llm_service, conversation_manager
+    global supabase_client, db_service, llm_service, conversation_manager
 
     # Startup
     logger.info("Starting AI microservice...")
 
-    db_service = DatabaseService(settings.database_url)
+    # Initialize Supabase client (shared across services)
+    supabase_client = create_client(settings.supabase_url, settings.supabase_key)
+    logger.info(f"Supabase client initialized")
+
+    # Initialize services
+    db_service = DatabaseService(settings.supabase_url, settings.supabase_key)
     llm_service = LLMService(db_service)
     conversation_manager = ConversationManager(
-        db_service=db_service,
+        supabase_client=supabase_client,
         ttl_hours=settings.conversation_ttl_hours
     )
 
