@@ -1,0 +1,9 @@
+**/node_modules
+**/.expo
+**/.git
+**/__pycache__
+**/venv
+**/.env
+**/.env.local
+**/npm-debug.log
+**/yarn-error.log

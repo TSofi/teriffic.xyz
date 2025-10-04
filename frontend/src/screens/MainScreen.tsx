@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,10 +7,13 @@ import {
   StyleSheet,
   Platform,
   ScrollView,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import MapComponent from '../components/MapComponent';
+import { aiService } from '../services/aiService';
 
 type MainScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -21,10 +24,42 @@ type Props = {
 const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
 
+interface ChatMessageType {
+  id: string;
+  text: string;
+  isUser: boolean;
+  timestamp: Date;
+}
+
 export default function MainScreen({ navigation }: Props) {
   const [arrivalPoint, setArrivalPoint] = useState('');
   const [destinationPoint, setDestinationPoint] = useState('');
   const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatMessageType[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const conversationIdRef = useRef<string | undefined>(undefined);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const panelHeightAnim = useRef(new Animated.Value(0)).current;
+  const iconOpacityAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.timing(panelHeightAnim, {
+      toValue: isChatExpanded ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [isChatExpanded]);
+
+  useEffect(() => {
+    Animated.timing(iconOpacityAnim, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [chatMessage]);
 
   const busLines = [
     { number: '999', color: ['#E63946', '#DC2F02'] },
@@ -32,8 +67,125 @@ export default function MainScreen({ navigation }: Props) {
     { number: '111', color: ['#10B981', '#059669'] },
   ];
 
-  const handleVoiceRecord = () => {
-    console.log('Voice recording...');
+  const handleSendMessage = async () => {
+    if (!chatMessage.trim()) return;
+
+    const userMessage: ChatMessageType = {
+      id: Date.now().toString(),
+      text: chatMessage,
+      isUser: true,
+      timestamp: new Date(),
+    };
+
+    setChatHistory(prev => [...prev, userMessage]);
+    setChatMessage('');
+    setIsLoading(true);
+    setIsChatExpanded(true); // Expand chat when sending message
+
+    try {
+      const response = await aiService.chat({
+        message: chatMessage,
+        conversation_id: conversationIdRef.current,
+        include_history: true,
+      });
+
+      conversationIdRef.current = response.conversation_id;
+
+      const aiMessage: ChatMessageType = {
+        id: (Date.now() + 1).toString(),
+        text: response.response,
+        isUser: false,
+        timestamp: new Date(),
+      };
+
+      setChatHistory(prev => [...prev, aiMessage]);
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMessage: ChatMessageType = {
+        id: (Date.now() + 1).toString(),
+        text: 'Sorry, I could not process your request. Please try again.',
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setChatHistory(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVoiceRecord = async () => {
+    if (!isRecording) {
+      // Start recording
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          audioChunksRef.current.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          await handleTranscribe(audioBlob);
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (error) {
+        console.error('Microphone access error:', error);
+        alert('Could not access microphone. Please allow microphone access.');
+      }
+    } else {
+      // Stop recording
+      if (mediaRecorderRef.current) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }
+    }
+  };
+
+  const handleTranscribe = async (audioBlob: Blob) => {
+    setIsLoading(true);
+    try {
+      const audioBase64 = await aiService.audioToBase64(audioBlob);
+      const transcription = await aiService.transcribe({ audio_base64: audioBase64 });
+
+      if (transcription.success && transcription.text) {
+        setChatMessage(transcription.text);
+        // Automatically send the transcribed message
+        const response = await aiService.chat({
+          message: transcription.text,
+          conversation_id: conversationIdRef.current,
+          include_history: true,
+        });
+
+        conversationIdRef.current = response.conversation_id;
+
+        const userMessage: ChatMessageType = {
+          id: Date.now().toString(),
+          text: transcription.text,
+          isUser: true,
+          timestamp: new Date(),
+        };
+
+        const aiMessage: ChatMessageType = {
+          id: (Date.now() + 1).toString(),
+          text: response.response,
+          isUser: false,
+          timestamp: new Date(),
+        };
+
+        setChatHistory(prev => [...prev, userMessage, aiMessage]);
+      }
+    } catch (error) {
+      console.error('Transcription error:', error);
+      alert('Could not transcribe audio. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleRewardsPress = () => {
@@ -76,9 +228,56 @@ export default function MainScreen({ navigation }: Props) {
         </View>
 
         {/* Bottom Panel */}
-        <View style={styles.bottomPanel}>
-          {/* Bus Lines Section */}
-          <View style={styles.busLinesSection}>
+        <Animated.View
+          style={[
+            styles.bottomPanel,
+            isChatExpanded && {
+              height: panelHeightAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [200, 500],
+              }),
+            }
+          ]}
+        >
+          {/* Chat History - Only visible when expanded */}
+          {isChatExpanded && chatHistory.length > 0 && (
+            <View style={styles.chatHistorySection}>
+              <View style={styles.chatHistoryHeader}>
+                <Text style={styles.chatHistoryTitle}>CONVERSATION</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    Animated.timing(panelHeightAnim, {
+                      toValue: 0,
+                      duration: 300,
+                      useNativeDriver: false,
+                    }).start(() => setIsChatExpanded(false));
+                  }}
+                  style={styles.closeButtonTouchable}
+                >
+                  <Text style={styles.chatCloseButton}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.chatHistoryScroll} showsVerticalScrollIndicator={false}>
+                {chatHistory.map((msg) => (
+                  <View
+                    key={msg.id}
+                    style={[
+                      styles.chatBubble,
+                      msg.isUser ? styles.chatBubbleUser : styles.chatBubbleAI,
+                    ]}
+                  >
+                    <Text style={[styles.chatBubbleText, msg.isUser && styles.chatBubbleTextUser]}>
+                      {msg.text}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Bus Lines Section - Hidden when chat is expanded */}
+          {!isChatExpanded && (
+            <View style={styles.busLinesSection}>
             <Text style={styles.sectionTitle}>Your Bus Lines</Text>
             <View style={styles.busLinesRow}>
               <ScrollView
@@ -145,9 +344,10 @@ export default function MainScreen({ navigation }: Props) {
               </TouchableOpacity>
             </View>
           </View>
+          )}
 
-          {/* White Divider */}
-          <View style={styles.horizontalDivider} />
+          {/* White Divider - Hidden when chat is expanded */}
+          {!isChatExpanded && <View style={styles.horizontalDivider} />}
 
           {/* AI Chat Section */}
           <View style={styles.chatSection}>
@@ -158,25 +358,49 @@ export default function MainScreen({ navigation }: Props) {
               value={chatMessage}
               onChangeText={setChatMessage}
               multiline
+              editable={!isLoading}
             />
-            <TouchableOpacity
-              style={styles.voiceButton}
-              onPress={handleVoiceRecord}
-              activeOpacity={0.8}
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14Z"
-                  fill="#000000"
-                />
-                <path
-                  d="M17 11C17 13.76 14.76 16 12 16C9.24 16 7 13.76 7 11H5C5 14.53 7.61 17.43 11 17.92V21H13V17.92C16.39 17.43 19 14.53 19 11H17Z"
-                  fill="#000000"
-                />
-              </svg>
-            </TouchableOpacity>
+            {isLoading ? (
+              <View style={styles.actionButton}>
+                <ActivityIndicator size="small" color="#000000" />
+              </View>
+            ) : chatMessage.trim().length > 0 ? (
+              <Animated.View style={{ opacity: iconOpacityAnim }}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={handleSendMessage}
+                  activeOpacity={0.8}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"
+                      fill="#000000"
+                    />
+                  </svg>
+                </TouchableOpacity>
+              </Animated.View>
+            ) : (
+              <Animated.View style={{ opacity: iconOpacityAnim }}>
+                <TouchableOpacity
+                  style={[styles.actionButton, isRecording && styles.actionButtonRecording]}
+                  onPress={handleVoiceRecord}
+                  activeOpacity={0.8}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14Z"
+                      fill={isRecording ? "#FFFFFF" : "#000000"}
+                    />
+                    <path
+                      d="M17 11C17 13.76 14.76 16 12 16C9.24 16 7 13.76 7 11H5C5 14.53 7.61 17.43 11 17.92V21H13V17.92C16.39 17.43 19 14.53 19 11H17Z"
+                      fill={isRecording ? "#FFFFFF" : "#000000"}
+                    />
+                  </svg>
+                </TouchableOpacity>
+              </Animated.View>
+            )}
           </View>
-        </View>
+        </Animated.View>
       </View>
     </View>
   );
@@ -270,6 +494,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
+    transition: 'height 0.3s ease',
+  },
+  bottomPanelExpanded: {
+    height: '60%',
   },
   busLinesSection: {
     marginBottom: 15,
@@ -348,7 +576,7 @@ const styles = StyleSheet.create({
     maxHeight: 100,
     fontFamily: 'Inter, sans-serif',
   },
-  voiceButton: {
+  actionButton: {
     width: 50,
     height: 50,
     backgroundColor: '#FFFFFF',
@@ -360,5 +588,59 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+  },
+  actionButtonRecording: {
+    backgroundColor: '#E63946',
+  },
+  chatHistorySection: {
+    flex: 1,
+    marginBottom: 15,
+  },
+  chatHistoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  chatHistoryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+    fontFamily: 'Inter, sans-serif',
+  },
+  closeButtonTouchable: {
+    padding: 5,
+  },
+  chatCloseButton: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontWeight: '300',
+    fontFamily: 'Inter, sans-serif',
+  },
+  chatHistoryScroll: {
+    flex: 1,
+  },
+  chatBubble: {
+    maxWidth: '80%',
+    padding: 12,
+    borderRadius: 15,
+    marginBottom: 10,
+  },
+  chatBubbleUser: {
+    backgroundColor: '#FFFFFF',
+    alignSelf: 'flex-end',
+  },
+  chatBubbleAI: {
+    backgroundColor: '#1A1A1A',
+    alignSelf: 'flex-start',
+  },
+  chatBubbleText: {
+    fontSize: 14,
+    color: '#CCCCCC',
+    fontFamily: 'Inter, sans-serif',
+  },
+  chatBubbleTextUser: {
+    color: '#000000',
   },
 });

@@ -33,20 +33,21 @@ class DatabaseService:
             List of recent reports within last hour
         """
         try:
-            # Get reports from last hour
-            one_hour_ago = (datetime.now() - timedelta(hours=1)).isoformat()
+            # Get reports from last hour (use UTC timezone-aware datetime)
+            from datetime import timezone
+            one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
 
-            # Build query
+            # Build query with case-insensitive matching
             query = self.client.table('reports')\
                 .select('*')\
-                .eq('bus_number', bus_number)\
-                .eq('station_id', station_id)\
+                .ilike('bus_number', bus_number)\
+                .ilike('station_id', station_id)\
                 .gte('reported_time', one_hour_ago)\
                 .order('reported_time', desc=True)
 
-            # Add route filter if specified
+            # Add route filter if specified (case-insensitive)
             if route:
-                query = query.eq('route', route)
+                query = query.ilike('route', route)
 
             response = query.execute()
 
@@ -80,12 +81,14 @@ class DatabaseService:
             True if successful, False otherwise
         """
         try:
+            # Use UTC timezone-aware datetime
+            from datetime import timezone
             data = {
                 "user_id": user_id,
                 "bus_number": bus_number,
                 "station_id": station_id,
                 "status": status,
-                "reported_time": datetime.now().isoformat()
+                "reported_time": datetime.now(timezone.utc).isoformat()
             }
 
             if route:
