@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Dimensions,
   Platform,
+  Image,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -32,9 +33,11 @@ export default function LoginScreen({ navigation }: Props) {
         {/* Top section with logo/title */}
         <View style={styles.topSection}>
         <View style={styles.iconContainer}>
-          <View style={styles.iconCircle}>
-            <Text style={styles.iconText}>🚗</Text>
-          </View>
+          <Image
+            source={require('../../icon.png')}
+            style={styles.iconImage}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.title}>Teriffic</Text>
         <Text style={styles.subtitle}>Traffic</Text>
@@ -98,18 +101,9 @@ const styles = StyleSheet.create({
   iconContainer: {
     marginBottom: 40,
   },
-  iconCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#000000',
-  },
-  iconText: {
-    fontSize: 60,
+  iconImage: {
+    width: 200,
+    height: 200,
   },
   title: {
     fontSize: 48,

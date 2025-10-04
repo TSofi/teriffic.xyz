@@ -134,22 +134,27 @@ export default function MapComponent({
     const drawRoutes = () => {
       if (!googleMapRef.current || !directionsServiceRef.current) return;
 
+      console.log('drawRoutes called');
+      console.log('routeData:', routeData);
+
       // Clear existing renderers and markers
       directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
       directionsRenderersRef.current = [];
       markersRef.current.forEach(marker => marker.setMap(null));
       markersRef.current = [];
 
-      // Use backend route data if available, otherwise use mock
+      // Use backend route data if available
       const useBackendData = routeData && routeData.bus_stations;
 
+      console.log('useBackendData:', useBackendData);
+
       if (!useBackendData) {
-        // Use mock data
-        drawMockRoute();
+        console.log('No backend data, skipping route drawing');
         return;
       }
 
       // Draw real route from backend
+      console.log('Drawing backend route...');
       drawBackendRoute();
     };
 
@@ -312,21 +317,21 @@ export default function MapComponent({
       console.log('Drawing backend route:', routeData);
 
       // Extract coordinates from backend data
-      const userLocation = {
+      const departureStation = {
         lat: routeData.departure_station.latitude,
         lng: routeData.departure_station.longitude
+      };
+
+      const arrivalStation = {
+        lat: routeData.arrival_station.latitude,
+        lng: routeData.arrival_station.longitude
       };
 
       const busStations = routeData.bus_stations.map((station: any) => ({
         lat: station.latitude,
         lng: station.longitude,
-        name: station.name
+        name: station.station_name
       }));
-
-      const finalDestination = {
-        lat: routeData.arrival_station.latitude,
-        lng: routeData.arrival_station.longitude
-      };
 
       if (busStations.length === 0) {
         console.error('No bus stations found in route data');
@@ -336,7 +341,14 @@ export default function MapComponent({
       const firstStation = busStations[0];
       const lastStation = busStations[busStations.length - 1];
 
-      // 1. Walking route: User location → First station (DASHED BLUE)
+      console.log('Departure station:', departureStation);
+      console.log('First bus station:', firstStation);
+      console.log('Last bus station:', lastStation);
+      console.log('Arrival station:', arrivalStation);
+
+      // 1. Walking route: Departure station → First bus station (DASHED BLUE)
+      // Note: In the current API, departure_station IS the first station, so this might be redundant
+      // But we'll keep it for consistency with the design
       const walkingRenderer1 = new google.maps.DirectionsRenderer({
         map: googleMapRef.current,
         suppressMarkers: true,
@@ -353,7 +365,7 @@ export default function MapComponent({
       });
 
       directionsServiceRef.current.route({
-        origin: userLocation,
+        origin: departureStation,
         destination: firstStation,
         travelMode: google.maps.TravelMode.WALKING,
       }, (result, status) => {
@@ -400,7 +412,7 @@ export default function MapComponent({
         directionsRenderersRef.current.push(busRenderer);
       }
 
-      // 3. Walking route: Last station → Final destination (DASHED GREEN)
+      // 3. Walking route: Last station → Arrival station (DASHED GREEN)
       const walkingRenderer2 = new google.maps.DirectionsRenderer({
         map: googleMapRef.current,
         suppressMarkers: true,
@@ -418,7 +430,7 @@ export default function MapComponent({
 
       directionsServiceRef.current.route({
         origin: lastStation,
-        destination: finalDestination,
+        destination: arrivalStation,
         travelMode: google.maps.TravelMode.WALKING,
       }, (result, status) => {
         if (status === 'OK' && result) {
@@ -432,9 +444,9 @@ export default function MapComponent({
 
       // Add markers for backend route
       const marker1 = new google.maps.Marker({
-        position: userLocation,
+        position: departureStation,
         map: googleMapRef.current,
-        title: 'Your Location',
+        title: 'Departure Location',
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 8,
@@ -480,7 +492,7 @@ export default function MapComponent({
       markersRef.current.push(marker3);
 
       const marker4 = new google.maps.Marker({
-        position: finalDestination,
+        position: arrivalStation,
         map: googleMapRef.current,
         title: 'Final Destination',
         icon: {
@@ -497,8 +509,8 @@ export default function MapComponent({
 
       // Center map to show entire route
       const bounds = new google.maps.LatLngBounds();
-      bounds.extend(userLocation);
-      bounds.extend(finalDestination);
+      bounds.extend(departureStation);
+      bounds.extend(arrivalStation);
       busStations.forEach((station: any) => bounds.extend(station));
       googleMapRef.current.fitBounds(bounds);
     };
@@ -511,6 +523,256 @@ export default function MapComponent({
       }
     };
   }, [currentLocation, zoom]);
+
+  // Re-draw routes when routeData changes
+  useEffect(() => {
+    console.log('routeData changed:', routeData);
+    if (routeData && googleMapRef.current) {
+      console.log('Triggering route redraw');
+      const drawRoutes = () => {
+        if (!googleMapRef.current || !directionsServiceRef.current) return;
+
+        console.log('drawRoutes called from useEffect');
+        console.log('routeData:', routeData);
+
+        // Clear existing renderers and markers
+        directionsRenderersRef.current.forEach(renderer => renderer.setMap(null));
+        directionsRenderersRef.current = [];
+        markersRef.current.forEach(marker => marker.setMap(null));
+        markersRef.current = [];
+
+        // Use backend route data if available
+        const useBackendData = routeData && routeData.bus_stations;
+
+        console.log('useBackendData:', useBackendData);
+
+        if (!useBackendData) {
+          console.log('No backend data, skipping route drawing');
+          return;
+        }
+
+        // Draw real route from backend
+        console.log('Drawing backend route...');
+        drawBackendRoute();
+      };
+
+      const drawBackendRoute = () => {
+        if (!routeData || !googleMapRef.current || !directionsServiceRef.current) return;
+
+        console.log('Drawing backend route:', routeData);
+
+        // Extract user's actual start/end locations
+        const userStartLocation = routeData.user_start_location || {
+          lat: routeData.departure_station.latitude,
+          lng: routeData.departure_station.longitude
+        };
+
+        const userEndLocation = routeData.user_end_location || {
+          lat: routeData.arrival_station.latitude,
+          lng: routeData.arrival_station.longitude
+        };
+
+        // Extract bus station coordinates
+        const departureStation = {
+          lat: routeData.departure_station.latitude,
+          lng: routeData.departure_station.longitude
+        };
+
+        const arrivalStation = {
+          lat: routeData.arrival_station.latitude,
+          lng: routeData.arrival_station.longitude
+        };
+
+        const busStations = routeData.bus_stations.map((station: any) => ({
+          lat: station.latitude,
+          lng: station.longitude,
+          name: station.station_name
+        }));
+
+        if (busStations.length === 0) {
+          console.error('No bus stations found in route data');
+          return;
+        }
+
+        const firstStation = busStations[0];
+        const lastStation = busStations[busStations.length - 1];
+
+        console.log('User start location:', userStartLocation);
+        console.log('Departure station:', departureStation);
+        console.log('First bus station:', firstStation);
+        console.log('Last bus station:', lastStation);
+        console.log('Arrival station:', arrivalStation);
+        console.log('User end location:', userEndLocation);
+
+        // 1. Walking route: User start → First bus station (DASHED BLUE)
+        const walkingRenderer1 = new google.maps.DirectionsRenderer({
+          map: googleMapRef.current,
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: '#06B6D4',
+            strokeWeight: 4,
+            strokeOpacity: 0.8,
+            icons: [{
+              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+              offset: '0',
+              repeat: '20px'
+            }]
+          }
+        });
+
+        directionsServiceRef.current.route({
+          origin: userStartLocation,
+          destination: departureStation,
+          travelMode: google.maps.TravelMode.WALKING,
+        }, (result, status) => {
+          if (status === 'OK' && result) {
+            walkingRenderer1.setDirections(result);
+          } else {
+            console.error('Walking route 1 failed:', status);
+          }
+        });
+
+        directionsRenderersRef.current.push(walkingRenderer1);
+
+        // 2. Bus route: First station → through all stations → Last station (SOLID RED)
+        if (busStations.length > 1) {
+          const busRenderer = new google.maps.DirectionsRenderer({
+            map: googleMapRef.current,
+            suppressMarkers: true,
+            polylineOptions: {
+              strokeColor: '#E63946',
+              strokeWeight: 6,
+              strokeOpacity: 1,
+            }
+          });
+
+          const waypoints = busStations.slice(1, -1).map((station: any) => ({
+            location: new google.maps.LatLng(station.lat, station.lng),
+            stopover: true
+          }));
+
+          directionsServiceRef.current.route({
+            origin: firstStation,
+            destination: lastStation,
+            waypoints: waypoints,
+            travelMode: google.maps.TravelMode.DRIVING,
+          }, (result, status) => {
+            if (status === 'OK' && result) {
+              busRenderer.setDirections(result);
+            } else {
+              console.error('Bus route failed:', status);
+            }
+          });
+
+          directionsRenderersRef.current.push(busRenderer);
+        }
+
+        // 3. Walking route: Last station → User end location (DASHED GREEN)
+        const walkingRenderer2 = new google.maps.DirectionsRenderer({
+          map: googleMapRef.current,
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: '#10B981',
+            strokeWeight: 4,
+            strokeOpacity: 0.8,
+            icons: [{
+              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 4 },
+              offset: '0',
+              repeat: '20px'
+            }]
+          }
+        });
+
+        directionsServiceRef.current.route({
+          origin: arrivalStation,
+          destination: userEndLocation,
+          travelMode: google.maps.TravelMode.WALKING,
+        }, (result, status) => {
+          if (status === 'OK' && result) {
+            walkingRenderer2.setDirections(result);
+          } else {
+            console.error('Walking route 2 failed:', status);
+          }
+        });
+
+        directionsRenderersRef.current.push(walkingRenderer2);
+
+        // Add markers
+        const marker1 = new google.maps.Marker({
+          position: userStartLocation,
+          map: googleMapRef.current,
+          title: 'Your Start Location',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#4285F4',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 2,
+          },
+        });
+
+        markersRef.current.push(marker1);
+
+        const marker2 = new google.maps.Marker({
+          position: firstStation,
+          map: googleMapRef.current,
+          title: `${firstStation.name} (Boarding)`,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#E63946',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 3,
+          },
+        });
+
+        markersRef.current.push(marker2);
+
+        const marker3 = new google.maps.Marker({
+          position: lastStation,
+          map: googleMapRef.current,
+          title: `${lastStation.name} (Exit)`,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: '#E63946',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 3,
+          },
+        });
+
+        markersRef.current.push(marker3);
+
+        const marker4 = new google.maps.Marker({
+          position: userEndLocation,
+          map: googleMapRef.current,
+          title: 'Your Destination',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#10B981',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 2,
+          },
+        });
+
+        markersRef.current.push(marker4);
+
+        // Center map to show entire route
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend(userStartLocation);
+        bounds.extend(userEndLocation);
+        busStations.forEach((station: any) => bounds.extend(station));
+        googleMapRef.current.fitBounds(bounds);
+      };
+
+      drawRoutes();
+    }
+  }, [routeData]);
 
   return (
     <View style={styles.container}>
