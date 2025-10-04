@@ -364,8 +364,15 @@ export default function MainScreen({ navigation }: Props) {
         departure_time: departureTime,
       });
 
-      setRouteData(route);
-      console.log('Route planned successfully:', route);
+      // Add user's original coordinates to route data for walking segments
+      const enrichedRoute = {
+        ...route,
+        user_start_location: startCoords,
+        user_end_location: destCoords,
+      };
+
+      setRouteData(enrichedRoute);
+      console.log('Route planned successfully:', enrichedRoute);
     } catch (error) {
       console.error('Route search error:', error);
       alert('Could not plan route. Please try again.');
@@ -888,6 +895,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+    zIndex: 10,
   },
   divider: {
     height: 1,

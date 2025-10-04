@@ -173,10 +173,10 @@ export interface RoutePlanRequest {
 
 export async function planRoute(request: RoutePlanRequest): Promise<any> {
   try {
-    console.log('Planning route to:', `${ROUTE_SERVICE_URL}/api/route/plan`);
+    console.log('Planning route to:', `${ROUTE_SERVICE_URL}/api/plan-journey`);
     console.log('Request:', request);
 
-    const response = await fetch(`${ROUTE_SERVICE_URL}/api/route/plan`, {
+    const response = await fetch(`${ROUTE_SERVICE_URL}/api/plan-journey`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
