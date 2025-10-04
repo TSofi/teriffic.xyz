@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Terriffic Traffic",
+    "slug": "terriffic-traffic",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.terriffic.traffic"
+    },
+    "android": {
+      "package": "com.terriffic.traffic"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
