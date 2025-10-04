@@ -15,6 +15,94 @@ class DatabaseService:
         self.client: Client = create_client(supabase_url, supabase_key)
         logger.info(f"Supabase client initialized for {supabase_url}")
 
+    async def get_bus_reports(
+        self,
+        bus_number: str,
+        station_id: str,
+        route: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get recent bus reports from the last hour for a specific bus and station.
+
+        Args:
+            bus_number: Bus number (e.g., '999')
+            station_id: Station ID
+            route: Optional route/line name
+
+        Returns:
+            List of recent reports within last hour
+        """
+        try:
+            # Get reports from last hour
+            one_hour_ago = (datetime.now() - timedelta(hours=1)).isoformat()
+
+            # Build query
+            query = self.client.table('reports')\
+                .select('*')\
+                .eq('bus_number', bus_number)\
+                .eq('station_id', station_id)\
+                .gte('reported_time', one_hour_ago)\
+                .order('reported_time', desc=True)
+
+            # Add route filter if specified
+            if route:
+                query = query.eq('route', route)
+
+            response = query.execute()
+
+            return response.data or []
+
+        except Exception as e:
+            logger.error(f"Error fetching bus reports: {e}")
+            return []
+
+    async def create_bus_report(
+        self,
+        bus_number: str,
+        station_id: str,
+        status: str,
+        route: Optional[str] = None,
+        delay: Optional[int] = None,
+        user_id: int = 1  # Default user_id, should be replaced with actual user auth
+    ) -> bool:
+        """
+        Create a new bus report in the reports table.
+
+        Args:
+            bus_number: Bus number (e.g., '999')
+            station_id: Station ID
+            status: Status (delayed, on_time, cancelled, etc.)
+            route: Optional route/line name
+            delay: Optional delay in minutes
+            user_id: User ID (default 1 for anonymous)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            data = {
+                "user_id": user_id,
+                "bus_number": bus_number,
+                "station_id": station_id,
+                "status": status,
+                "reported_time": datetime.now().isoformat()
+            }
+
+            if route:
+                data["route"] = route
+
+            if delay is not None:
+                data["delay"] = delay
+
+            response = self.client.table('reports').insert(data).execute()
+
+            logger.info(f"Report created: bus_number={bus_number}, station={station_id}, status={status}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error creating bus report: {e}")
+            return False
+
     async def get_line_status(self, line_number: str) -> Optional[Dict[str, Any]]:
         """Get current operational status for a bus line."""
         try:
