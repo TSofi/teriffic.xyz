@@ -4,8 +4,20 @@ import asyncio
 import json
 from datetime import datetime
 import random
+from collections import defaultdict
 
 router = APIRouter()
+
+# Global notification queues for each user
+notification_queues = defaultdict(asyncio.Queue)
+
+async def notify_report_verified(user_id: int):
+    """Send notification when report is verified - called from report_verifier.py"""
+    notification = {
+        "user_id": user_id
+    }
+    await notification_queues[user_id].put(notification)
+    print(f"✓ Notification sent to user {user_id}: Report verified")
 
 # Mock notification data generator
 async def generate_mock_notifications(user_id: int):
@@ -87,17 +99,26 @@ async def notification_stream(request: Request, user_id: int = 1):
 
     async def event_generator():
         try:
-            async for notification in generate_mock_notifications(user_id):
+            queue = notification_queues[user_id]
+
+            while True:
                 # Check if client is still connected
                 if await request.is_disconnected():
                     break
 
-                # Send notification as SSE event
-                yield {
-                    "event": "notification",
-                    "id": str(notification["id"]),
-                    "data": json.dumps(notification)
-                }
+                # Wait for notification from queue (with timeout to check connection)
+                try:
+                    notification = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+                    # Send notification as SSE event
+                    yield {
+                        "event": "report_verified",
+                        "data": json.dumps(notification)
+                    }
+
+                except asyncio.TimeoutError:
+                    # No notification, continue loop
+                    continue
 
         except asyncio.CancelledError:
             print(f"Client disconnected from notification stream (user_id: {user_id})")

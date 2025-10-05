@@ -3,25 +3,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
 from bus_simulator import simulate_bus_movements
+from report_verifier import verify_reports
 from routes.journey_planner import router as journey_router
 from routes.rewards import router as rewards_router
 from routes.notifications import router as notifications_router
 
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     # Start background task when app starts
-#     task = asyncio.create_task(simulate_bus_movements())
-#     print("Bus simulator background task started")
-#     yield
-#     # Cancel task when app shuts down
-#     task.cancel()
-#     print("Bus simulator background task stopped")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start background tasks when app starts
+    bus_task = asyncio.create_task(simulate_bus_movements())
+    report_task = asyncio.create_task(verify_reports())
+    print("Bus simulator background task started")
+    print("Report verifier background task started")
+    yield
+    # Cancel tasks when app shuts down
+    bus_task.cancel()
+    report_task.cancel()
+    print("Bus simulator background task stopped")
+    print("Report verifier background task stopped")
 
 app = FastAPI(
     title="Teriffic.xyz Bus Tracking API",
     description="Real-time bus tracking and journey planning for Krakow",
     version="1.0.0",
-    # lifespan=lifespan
+    lifespan=lifespan
 )
 
 # CORS middleware for frontend

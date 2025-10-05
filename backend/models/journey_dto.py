@@ -63,6 +63,9 @@ class JourneyResponse(BaseModel):
     average_arrival_delay_seconds: int    # Average delay at arrival station based on past data (rounded seconds)
     historical_sample_size: int           # Number of past routes used for delay calculation
 
+    # User-reported delay data
+    reported_delay_seconds: int = 0       # Delay reported by users for this route (in seconds)
+
 
 class JourneyError(BaseModel):
     """Error response"""

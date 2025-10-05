@@ -390,6 +390,38 @@ async def plan_journey(request: JourneyRequest):
 
         print(f"DEBUG: Historical data - {len(historical_delays_departure)} past departures, avg delay: {avg_departure_delay_sec} sec")
 
+        # Check for user-reported delays on this route
+        # Look for reports with status verified (true) or null for this route
+        # where the reported station is before the user's departure station
+        reported_delay_seconds = 0
+
+        try:
+            reports_response = supabase.table("reports").select("*").eq("route", route['id']).in_("status", [True, None]).execute()
+
+            if reports_response.data:
+                for report in reports_response.data:
+                    report_station_id = report.get("station_id")
+                    report_delay_minutes = report.get("delay", 0)
+
+                    if report_station_id and report_delay_minutes:
+                        # Find the position of the reported station and departure station in the route
+                        report_station_index = None
+                        departure_station_index = dep_idx
+
+                        for i, station_info in enumerate(route['stations_info']):
+                            if station_info["station_id"] == report_station_id:
+                                report_station_index = i
+                                break
+
+                        # If report station is before departure station, use this delay
+                        if report_station_index is not None and report_station_index < departure_station_index:
+                            reported_delay_seconds = report_delay_minutes * 60
+                            print(f"DEBUG: Found user report for route {route['id']} at station {report_station_id} with {report_delay_minutes} min delay")
+                            break  # Use the first matching report
+
+        except Exception as e:
+            print(f"DEBUG: Error fetching reports: {str(e)}")
+
         # Get station details
         dep_station = departure_result['station']
         arr_station = arrival_result['station']
@@ -468,7 +500,9 @@ async def plan_journey(request: JourneyRequest):
 
             average_departure_delay_seconds=avg_departure_delay_sec,
             average_arrival_delay_seconds=avg_arrival_delay_sec,
-            historical_sample_size=len(historical_delays_departure)
+            historical_sample_size=len(historical_delays_departure),
+
+            reported_delay_seconds=reported_delay_seconds
         )
 
     except HTTPException:
