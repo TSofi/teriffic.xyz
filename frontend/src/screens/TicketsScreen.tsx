@@ -12,6 +12,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { rewardsService, Ticket } from '../services/rewardsService';
+import { useUser } from '../context/UserContext';
 
 type TicketsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Tickets'>;
 
@@ -22,21 +23,25 @@ type Props = {
 const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
 
-// TODO: Replace with actual user authentication
-const CURRENT_USER_ID = 1;
-
 export default function TicketsScreen({ navigation }: Props) {
+  const { userId } = useUser();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadTickets();
-  }, []);
+  }, [userId]);
 
   const loadTickets = async () => {
+    if (!userId) {
+      console.log('No userId, skipping tickets load');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       setIsLoading(true);
-      const userTickets = await rewardsService.getUserTickets(CURRENT_USER_ID);
+      const userTickets = await rewardsService.getUserTickets(userId);
       setTickets(userTickets);
     } catch (error) {
       console.error('Failed to load tickets:', error);

@@ -10,17 +10,15 @@ from routes.notifications import router as notifications_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start background tasks when app starts
-    bus_task = asyncio.create_task(simulate_bus_movements())
-    report_task = asyncio.create_task(verify_reports())
-    print("Bus simulator background task started")
-    print("Report verifier background task started")
+    # Background tasks disabled to prevent server crashes
+    # bus_task = asyncio.create_task(simulate_bus_movements())
+    # report_task = asyncio.create_task(verify_reports())
+    print("Background tasks disabled")
     yield
     # Cancel tasks when app shuts down
-    bus_task.cancel()
-    report_task.cancel()
-    print("Bus simulator background task stopped")
-    print("Report verifier background task stopped")
+    # bus_task.cancel()
+    # report_task.cancel()
+    print("App shutting down")
 
 app = FastAPI(
     title="Teriffic.xyz Bus Tracking API",
