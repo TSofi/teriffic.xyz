@@ -52,6 +52,15 @@ export default function MainScreen({ navigation }: Props) {
   const [showArrivalSuggestions, setShowArrivalSuggestions] = useState(false);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
   const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
+  const [expandedSections, setExpandedSections] = useState<{[key: string]: boolean}>({
+    walking1: false,
+    waiting: false,
+    bus: false,
+    walking2: false,
+  });
+  const [showPredictedDelayPopup, setShowPredictedDelayPopup] = useState(false);
+  const [showReportedDelayPopup, setShowReportedDelayPopup] = useState(false);
+  const [userCurrentLocation, setUserCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -59,6 +68,13 @@ export default function MainScreen({ navigation }: Props) {
   const iconOpacityAnim = useRef(new Animated.Value(1)).current;
   const arrivalDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const destinationDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
 
   useEffect(() => {
     Animated.timing(panelHeightAnim, {
@@ -124,12 +140,6 @@ export default function MainScreen({ navigation }: Props) {
   //     notificationService.disconnect();
   //   };
   // }, [userId]);
-
-  const busLines = [
-    { number: '999', color: ['#E63946', '#DC2F02'] },
-    { number: '704', color: ['#06B6D4', '#0891B2'] },
-    { number: '111', color: ['#10B981', '#059669'] },
-  ];
 
   const handleSendMessage = async () => {
     if (!chatMessage.trim()) return;
@@ -275,6 +285,9 @@ export default function MainScreen({ navigation }: Props) {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
+
+        // Save user location for map marker
+        setUserCurrentLocation({ lat: latitude, lng: longitude });
 
         // Reverse geocode to get address
         const address = await reverseGeocode(latitude, longitude);
@@ -488,6 +501,7 @@ export default function MainScreen({ navigation }: Props) {
             zoom={13}
             useCurrentLocation={false}
             routeData={routeData}
+            userLocation={userCurrentLocation}
           />
         </View>
 
@@ -649,40 +663,459 @@ export default function MainScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Time Information - Below Header */}
+        {/* Route Details - Expandable from Bottom */}
         {routeData && (
-          <View style={styles.timeInfoWrapper}>
-            <View style={styles.timeInfoContainer}>
-              <View style={[styles.timeTag, { borderColor: '#000000', backgroundColor: '#000000' }]}>
-                <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
-                  {Math.ceil(routeData.total_journey_time_minutes)} min
-                </Text>
-              </View>
-              {(userId === 1 || routeData.reported_delay_seconds > 0) && (
-                <View style={[styles.timeTag, { borderColor: '#E63946', backgroundColor: '#E63946', marginLeft: 8 }]}>
-                  <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
-                    +{userId === 1 ? 5 : Math.ceil(routeData.reported_delay_seconds / 60)} min
-                  </Text>
+          <>
+            {/* Expandable Journey Details */}
+            {expandedSections.summary && (
+              <View style={styles.routeDetailsWrapper}>
+                <ScrollView
+                  style={styles.routeDetailsScroll}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.routeDetailsContent}
+                  nestedScrollEnabled={true}
+                >
+                  {/* Compact Journey Summary - Inside expanded view */}
+                  <TouchableOpacity
+                    style={styles.journeySummaryCompact}
+                    activeOpacity={0.7}
+                    onPress={() => toggleSection('summary')}
+                  >
+                    <View style={styles.summaryLeft}>
+                      <Text style={styles.summaryTimeText}>{Math.ceil(routeData.total_journey_time_minutes)} min</Text>
+                      {!routeData.is_walking_only && (routeData.average_arrival_delay_seconds > 0 || routeData.reported_delay_seconds > 0) && (
+                        <Text style={styles.summaryDelayText}>+{Math.ceil(Math.max(routeData.average_arrival_delay_seconds, routeData.reported_delay_seconds) / 60)} min delay</Text>
+                      )}
+                    </View>
+                    <Text style={styles.expandIconText}>▼</Text>
+                  </TouchableOpacity>
+
+                  {/* Journey Timeline Details */}
+                <View style={styles.journeyTimeline}>
+                  {/* Walking to Station */}
+                  <TouchableOpacity
+                    style={styles.timelineStepClickable}
+                    onPress={() => toggleSection('walking1')}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.timelineIconContainer}>
+                      <View style={[styles.timelineIcon, { backgroundColor: '#06B6D4' }]}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                          <path d="M13 5C13 6.1 12.1 7 11 7C9.9 7 9 6.1 9 5C9 3.9 9.9 3 11 3C12.1 3 13 3.9 13 5ZM9.8 8.9L7 23H9.1L10.9 15L13 17V23H15V15.5L12.9 13.5L13.5 10.5C14.8 12 16.8 13 19 13V11C16.8 11 15.1 9.8 14.4 8.2L13.5 6.5C13.2 5.9 12.6 5.5 12 5.5C11.7 5.5 11.5 5.6 11.2 5.7L6 8.3V13H8V9.6L9.8 8.9Z" fill="#FFFFFF"/>
+                        </svg>
+                      </View>
+                      <View style={styles.timelineLine} />
+                    </View>
+                    <View style={styles.timelineContent}>
+                      <View style={styles.timelineHeader}>
+                        <Text style={styles.timelineTitle}>Walk to {routeData.departure_station?.station_name || 'bus stop'}</Text>
+                        <Text style={styles.timelineExpandIcon}>{expandedSections.walking1 ? '▼' : '▶'}</Text>
+                      </View>
+                      {!expandedSections.walking1 && (
+                        <Text style={styles.timelineSubtitle}>
+                          {Math.ceil(routeData.walking_to_departure_time_minutes)} min
+                        </Text>
+                      )}
+                      {expandedSections.walking1 && (
+                        <>
+                          <Text style={styles.timelineSubtitle}>
+                            {Math.ceil(routeData.walking_to_departure_time_minutes)} min · {routeData.walking_to_departure_distance_km.toFixed(2)} km
+                          </Text>
+                          {routeData.user_arrival_at_station_time && (
+                            <Text style={styles.timelineTime}>
+                              Arrive by {new Date(routeData.user_arrival_at_station_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          )}
+                        </>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Waiting at Station */}
+                  {!routeData.is_walking_only && routeData.total_waiting_time_minutes > 0 && (
+                    <TouchableOpacity
+                      style={styles.timelineStepClickable}
+                      onPress={() => toggleSection('waiting')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.timelineIconContainer}>
+                        <View style={[styles.timelineIcon, { backgroundColor: '#F59E0B' }]}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM12.5 7H11V13L16.2 16.2L17 14.9L12.5 12.2V7Z" fill="#FFFFFF"/>
+                          </svg>
+                        </View>
+                        <View style={styles.timelineLine} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                        <View style={styles.timelineHeader}>
+                          <Text style={styles.timelineTitle}>Wait at station</Text>
+                          <Text style={styles.timelineExpandIcon}>{expandedSections.waiting ? '▼' : '▶'}</Text>
+                        </View>
+                        <Text style={styles.timelineSubtitle}>{Math.ceil(routeData.total_waiting_time_minutes)} min wait</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Bus Ride */}
+                  {!routeData.is_walking_only && (
+                    <TouchableOpacity
+                      style={styles.timelineStepClickable}
+                      onPress={() => toggleSection('bus')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.timelineIconContainer}>
+                        <View style={[styles.timelineIcon, { backgroundColor: '#8B5CF6' }]}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M4 16C4 16.88 4.39 17.67 5 18.22V20C5 20.55 5.45 21 6 21H7C7.55 21 8 20.55 8 20V19H16V20C16 20.55 16.45 21 17 21H18C18.55 21 19 20.55 19 20V18.22C19.61 17.67 20 16.88 20 16V6C20 2.5 16.42 2 12 2C7.58 2 4 2.5 4 6V16ZM7.5 17C6.67 17 6 16.33 6 15.5C6 14.67 6.67 14 7.5 14C8.33 14 9 14.67 9 15.5C9 16.33 8.33 17 7.5 17ZM16.5 17C15.67 17 15 16.33 15 15.5C15 14.67 15.67 14 16.5 14C17.33 14 18 14.67 18 15.5C18 16.33 17.33 17 16.5 17ZM6 11V6H18V11H6Z" fill="#FFFFFF"/>
+                          </svg>
+                        </View>
+                        <View style={styles.timelineLine} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                        <View style={styles.busLineTag}>
+                          <Text style={styles.busLineTagText}>Line {routeData.line_number}</Text>
+                        </View>
+                        <View style={styles.timelineHeader}>
+                          <Text style={styles.timelineTitle}>
+                            {routeData.departure_station?.station_name} → {routeData.arrival_station?.station_name}
+                          </Text>
+                          <Text style={styles.timelineExpandIcon}>{expandedSections.bus ? '▼' : '▶'}</Text>
+                        </View>
+                        {!expandedSections.bus && routeData.bus_departure_time_scheduled && (
+                          <Text style={styles.timelineSubtitle}>
+                            Departs {new Date(routeData.bus_departure_time_scheduled).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                        )}
+                        {expandedSections.bus && (
+                          <>
+                            {routeData.bus_departure_time_scheduled && (
+                              <View style={styles.scheduleRow}>
+                                <Text style={styles.scheduleLabel}>Scheduled:</Text>
+                                <Text style={styles.scheduleTime}>
+                                  {new Date(routeData.bus_departure_time_scheduled).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                              </View>
+                            )}
+                            {/* Expected Departure - Redesigned */}
+                            {(routeData.average_departure_delay_seconds > 0 || routeData.reported_delay_seconds > 0) && routeData.bus_departure_time_scheduled && (
+                              <View style={styles.delaySection}>
+                                <View style={styles.expectedTimeRow}>
+                                  <Text style={styles.expectedLabel}>Expected:</Text>
+                                  <Text style={styles.expectedTime}>
+                                    {new Date(
+                                      new Date(routeData.bus_departure_time_scheduled).getTime() +
+                                      (Math.max(routeData.average_departure_delay_seconds, routeData.reported_delay_seconds) * 1000)
+                                    ).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                  </Text>
+                                  <View style={styles.delayBadge}>
+                                    <Text style={styles.delayBadgeText}>
+                                      +{Math.ceil(Math.max(routeData.average_departure_delay_seconds, routeData.reported_delay_seconds) / 60)} min
+                                    </Text>
+                                  </View>
+                                </View>
+
+                                {routeData.average_departure_delay_seconds > 0 && (
+                                  <TouchableOpacity
+                                    onPress={() => setShowPredictedDelayPopup(true)}
+                                    activeOpacity={0.7}
+                                    style={styles.delayInfoLink}
+                                  >
+                                    <Text style={styles.delayInfoIcon}>📊</Text>
+                                    <Text style={styles.delayInfoText}>Predicted delay</Text>
+                                  </TouchableOpacity>
+                                )}
+
+                                {routeData.reported_delay_seconds > 0 ? (
+                                  <TouchableOpacity
+                                    onPress={() => setShowReportedDelayPopup(true)}
+                                    activeOpacity={0.7}
+                                    style={styles.delayInfoLink}
+                                  >
+                                    <Text style={styles.delayInfoIcon}>🚨</Text>
+                                    <Text style={styles.delayInfoText}>User-reported delay</Text>
+                                  </TouchableOpacity>
+                                ) : (
+                                  <TouchableOpacity
+                                    onPress={() => setShowReportedDelayPopup(true)}
+                                    activeOpacity={0.7}
+                                    style={styles.delayInfoLink}
+                                  >
+                                    <Text style={styles.delayInfoIcon}>✓</Text>
+                                    <Text style={[styles.delayInfoText, styles.delayInfoTextPositive]}>No user-reported delays</Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
+                            )}
+                            {/* Bus Stations List */}
+                            {routeData.bus_stations && routeData.bus_stations.length > 0 && (
+                              <View style={styles.stationsListContainer}>
+                                <Text style={styles.stationsListTitle}>Stations ({routeData.bus_stations.length})</Text>
+                                {routeData.bus_stations.map((station: any, index: number) => (
+                                  <View key={index} style={styles.stationItem}>
+                                    <View style={[
+                                      styles.stationDot,
+                                      station.is_boarding_station && styles.stationDotBoarding,
+                                      station.is_exit_station && styles.stationDotExit
+                                    ]} />
+                                    <View style={styles.stationInfo}>
+                                      <Text style={[
+                                        styles.stationName,
+                                        (station.is_boarding_station || station.is_exit_station) && styles.stationNameBold
+                                      ]}>
+                                        {station.station_name}
+                                        {station.is_boarding_station && ' (Board)'}
+                                        {station.is_exit_station && ' (Exit)'}
+                                      </Text>
+                                      <Text style={styles.stationTime}>
+                                        {new Date(station.departure_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+                          </>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Walking from Station */}
+                  {routeData.walking_from_arrival_time_minutes > 0 && (
+                    <TouchableOpacity
+                      style={styles.timelineStepClickable}
+                      onPress={() => toggleSection('walking2')}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.timelineIconContainer}>
+                        <View style={[styles.timelineIcon, { backgroundColor: '#06B6D4' }]}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                            <path d="M13 5C13 6.1 12.1 7 11 7C9.9 7 9 6.1 9 5C9 3.9 9.9 3 11 3C12.1 3 13 3.9 13 5ZM9.8 8.9L7 23H9.1L10.9 15L13 17V23H15V15.5L12.9 13.5L13.5 10.5C14.8 12 16.8 13 19 13V11C16.8 11 15.1 9.8 14.4 8.2L13.5 6.5C13.2 5.9 12.6 5.5 12 5.5C11.7 5.5 11.5 5.6 11.2 5.7L6 8.3V13H8V9.6L9.8 8.9Z" fill="#FFFFFF"/>
+                          </svg>
+                        </View>
+                        <View style={styles.timelineLine} />
+                      </View>
+                      <View style={styles.timelineContent}>
+                        <View style={styles.timelineHeader}>
+                          <Text style={styles.timelineTitle}>Walk to destination</Text>
+                          <Text style={styles.timelineExpandIcon}>{expandedSections.walking2 ? '▼' : '▶'}</Text>
+                        </View>
+                        {!expandedSections.walking2 && (
+                          <Text style={styles.timelineSubtitle}>
+                            {Math.ceil(routeData.walking_from_arrival_time_minutes)} min
+                          </Text>
+                        )}
+                        {expandedSections.walking2 && (
+                          <Text style={styles.timelineSubtitle}>
+                            {Math.ceil(routeData.walking_from_arrival_time_minutes)} min · {routeData.walking_from_arrival_distance_km.toFixed(2)} km
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Destination */}
+                  <View style={styles.timelineStep}>
+                    <View style={styles.timelineIconContainer}>
+                      <View style={[styles.timelineIcon, { backgroundColor: '#10B981' }]}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                          <path d="M12 2C8.13 2 5 5.13 5 9C5 14.25 12 22 12 22C12 22 19 14.25 19 9C19 5.13 15.87 2 12 2ZM12 11.5C10.62 11.5 9.5 10.38 9.5 9C9.5 7.62 10.62 6.5 12 6.5C13.38 6.5 14.5 7.62 14.5 9C14.5 10.38 13.38 11.5 12 11.5Z" fill="#FFFFFF"/>
+                        </svg>
+                      </View>
+                    </View>
+                    <View style={styles.timelineContent}>
+                      <Text style={styles.timelineTitle}>Destination</Text>
+                      <Text style={styles.timelineSubtitle}>You have arrived!</Text>
+                    </View>
+                  </View>
+
+                  {/* AI Chat Section - Inside Route Details */}
+                  <View style={styles.aiChatInRoute}>
+                    <Text style={styles.aiChatLabel}>Ask AI Assistant</Text>
+                    <View style={styles.chatSection}>
+                      <TextInput
+                        style={[styles.chatInput, !currentRouteId && styles.chatInputDisabled]}
+                        placeholder={currentRouteId ? "Ask AI assistant..." : "Generate a route first..."}
+                        placeholderTextColor="#666"
+                        value={chatMessage}
+                        onChangeText={setChatMessage}
+                        multiline
+                        editable={!isLoading && !!currentRouteId}
+                      />
+                      {isLoading ? (
+                        <View style={styles.actionButton}>
+                          <ActivityIndicator size="small" color="#000000" />
+                        </View>
+                      ) : chatMessage.trim().length > 0 && currentRouteId ? (
+                        <Animated.View style={{ opacity: iconOpacityAnim }}>
+                          <TouchableOpacity
+                            style={styles.actionButton}
+                            onPress={handleSendMessage}
+                            activeOpacity={0.8}
+                          >
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"
+                                fill="#000000"
+                              />
+                            </svg>
+                          </TouchableOpacity>
+                        </Animated.View>
+                      ) : (
+                        <Animated.View style={{ opacity: iconOpacityAnim }}>
+                          <TouchableOpacity
+                            style={[
+                              styles.actionButton,
+                              isRecording && styles.actionButtonRecording,
+                              !currentRouteId && styles.actionButtonDisabled
+                            ]}
+                            onPress={currentRouteId ? handleVoiceRecord : undefined}
+                            activeOpacity={0.8}
+                            disabled={!currentRouteId}
+                          >
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                              <path
+                                d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14Z"
+                                fill={isRecording ? "#FFFFFF" : "#000000"}
+                              />
+                              <path
+                                d="M17 11C17 13.76 14.76 16 12 16C9.24 16 7 13.76 7 11H5C5 14.53 7.61 17.43 11 17.92V21H13V17.92C16.39 17.43 19 14.53 19 11H17Z"
+                                fill={isRecording ? "#FFFFFF" : "#000000"}
+                              />
+                            </svg>
+                          </TouchableOpacity>
+                        </Animated.View>
+                      )}
+                    </View>
+                  </View>
                 </View>
               )}
+            </ScrollView>
+          </View>
+        )}
+
+            {/* Collapsed Summary Bar - At Bottom */}
+            {!expandedSections.summary && (
+              <View style={styles.bottomSummaryBar}>
+                <TouchableOpacity
+                  style={styles.journeySummaryCompact}
+                  activeOpacity={0.7}
+                  onPress={() => toggleSection('summary')}
+                >
+                  <View style={styles.summaryLeft}>
+                    <Text style={styles.summaryTimeText}>{Math.ceil(routeData.total_journey_time_minutes)} min</Text>
+                    {!routeData.is_walking_only && (routeData.average_arrival_delay_seconds > 0 || routeData.reported_delay_seconds > 0) && (
+                      <Text style={styles.summaryDelayText}>+{Math.ceil(Math.max(routeData.average_arrival_delay_seconds, routeData.reported_delay_seconds) / 60)} min delay</Text>
+                    )}
+                  </View>
+                  <Text style={styles.expandIconText}>▲</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
+
+        {/* Predicted Delay Learn More Popup */}
+        {showPredictedDelayPopup && (
+          <View style={styles.popupOverlay}>
+            <View style={styles.popupContainer}>
+              <View style={styles.popupHeader}>
+                <Text style={styles.popupTitle}>📊 Smart Delay Prediction</Text>
+                <TouchableOpacity
+                  onPress={() => setShowPredictedDelayPopup(false)}
+                  style={styles.popupCloseButton}
+                >
+                  <Text style={styles.popupCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.popupContent}>
+                <Text style={styles.popupText}>
+                  Our app analyzes <Text style={styles.popupTextBold}>thousands of past trips</Text> on this route to predict the most probable delays.
+                </Text>
+
+                <View style={styles.popupInfoBox}>
+                  <Text style={styles.popupInfoTitle}>How it works:</Text>
+                  <Text style={styles.popupInfoText}>• Historical data from previous journeys</Text>
+                  <Text style={styles.popupInfoText}>• Time of day patterns</Text>
+                  <Text style={styles.popupInfoText}>• Traffic conditions analysis</Text>
+                  <Text style={styles.popupInfoText}>• Weather impact correlation</Text>
+                </View>
+
+                <Text style={styles.popupSubtext}>
+                  This helps you plan your journey more accurately and arrive on time!
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.popupButton}
+                onPress={() => setShowPredictedDelayPopup(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.popupButtonText}>Understood</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
 
-        {/* Bottom Panel */}
-        <Animated.View
-          style={[
-            styles.bottomPanel,
-            isChatExpanded && {
-              height: panelHeightAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [200, 500],
-              }),
-            }
-          ]}
-        >
-          {/* Chat History - Only visible when expanded */}
-          {isChatExpanded && chatHistory.length > 0 && (
+        {/* Reported Delay Learn More Popup */}
+        {showReportedDelayPopup && (
+          <View style={styles.popupOverlay}>
+            <View style={styles.popupContainer}>
+              <View style={styles.popupHeader}>
+                <Text style={styles.popupTitle}>🚨 Real-Time User Reports</Text>
+                <TouchableOpacity
+                  onPress={() => setShowReportedDelayPopup(false)}
+                  style={styles.popupCloseButton}
+                >
+                  <Text style={styles.popupCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.popupContent}>
+                <Text style={styles.popupText}>
+                  Users like you report delays in real-time to help the community have a better travel experience!
+                </Text>
+
+                <View style={styles.popupInfoBox}>
+                  <Text style={styles.popupInfoTitle}>Why report delays?</Text>
+                  <Text style={styles.popupInfoText}>• Help fellow travelers plan better</Text>
+                  <Text style={styles.popupInfoText}>• Get real-time delay updates</Text>
+                  <Text style={styles.popupInfoText}>• Build a smarter transport system</Text>
+                  <Text style={styles.popupInfoText}>• Contribute to your community</Text>
+                </View>
+
+                <View style={styles.popupCallToAction}>
+                  <Text style={styles.popupCallToActionText}>
+                    Start reporting delays today and make everyone's journey better!
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.popupButton}
+                onPress={() => setShowReportedDelayPopup(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.popupButtonText}>Understood</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Chat History Panel - Only when expanded */}
+        {isChatExpanded && chatHistory.length > 0 && (
+          <Animated.View
+            style={[
+              styles.chatHistoryPanel,
+              {
+                height: panelHeightAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 400],
+                }),
+              }
+            ]}
+          >
             <View style={styles.chatHistorySection}>
               <View style={styles.chatHistoryHeader}>
                 <Text style={styles.chatHistoryTitle}>CONVERSATION</Text>
@@ -715,161 +1148,8 @@ export default function MainScreen({ navigation }: Props) {
                 ))}
               </ScrollView>
             </View>
-          )}
-
-          {/* Bus Lines Section - Hidden when chat is expanded */}
-          {!isChatExpanded && (
-            <View style={styles.busLinesSection}>
-            <Text style={styles.sectionTitle}>Your Bus Lines</Text>
-            <View style={styles.busLinesRow}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.busLinesScroll}
-                contentContainerStyle={styles.busLinesContent}
-              >
-                {busLines.map((bus, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.busLineCardWrapper,
-                      {
-                        background: `linear-gradient(135deg, ${bus.color[0]}, ${bus.color[1]})`,
-                      },
-                    ]}
-                  >
-                    <View style={styles.busLineCard}>
-                      <Text
-                        style={[
-                          styles.busLineNumber,
-                          {
-                            background: `linear-gradient(135deg, ${bus.color[0]}, ${bus.color[1]})`,
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
-                          },
-                        ]}
-                      >
-                        #{bus.number}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
-              <TouchableOpacity
-                style={styles.rewardsButton}
-                onPress={handleRewardsPress}
-                activeOpacity={0.8}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M4 4H20V8H4V4Z"
-                    stroke="#000000"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M4 8H20V20H4V8Z"
-                    stroke="#000000"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M8 12H16M8 16H12"
-                    stroke="#000000"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.ticketsButton}
-                onPress={handleTicketsPress}
-                activeOpacity={0.8}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M3 9L12 2L21 9V20C21 20.5304 20.7893 21.0391 20.4142 21.4142C20.0391 21.7893 19.5304 22 19 22H5C4.46957 22 3.96086 21.7893 3.58579 21.4142C3.21071 21.0391 3 20.5304 3 20V9Z"
-                    stroke="#000000"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9 22V12H15V22"
-                    stroke="#000000"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </TouchableOpacity>
-            </View>
-          </View>
-          )}
-
-          {/* White Divider - Hidden when chat is expanded */}
-          {!isChatExpanded && <View style={styles.horizontalDivider} />}
-
-          {/* AI Chat Section */}
-          <View style={styles.chatSection}>
-            <TextInput
-              style={[styles.chatInput, !currentRouteId && styles.chatInputDisabled]}
-              placeholder={currentRouteId ? "Ask AI assistant..." : "Generate a route first..."}
-              placeholderTextColor="#666"
-              value={chatMessage}
-              onChangeText={setChatMessage}
-              multiline
-              editable={!isLoading && !!currentRouteId}
-            />
-            {isLoading ? (
-              <View style={styles.actionButton}>
-                <ActivityIndicator size="small" color="#000000" />
-              </View>
-            ) : chatMessage.trim().length > 0 && currentRouteId ? (
-              <Animated.View style={{ opacity: iconOpacityAnim }}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={handleSendMessage}
-                  activeOpacity={0.8}
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M2.01 21L23 12L2.01 3L2 10L17 12L2 14L2.01 21Z"
-                      fill="#000000"
-                    />
-                  </svg>
-                </TouchableOpacity>
-              </Animated.View>
-            ) : (
-              <Animated.View style={{ opacity: iconOpacityAnim }}>
-                <TouchableOpacity
-                  style={[
-                    styles.actionButton,
-                    isRecording && styles.actionButtonRecording,
-                    !currentRouteId && styles.actionButtonDisabled
-                  ]}
-                  onPress={currentRouteId ? handleVoiceRecord : undefined}
-                  activeOpacity={0.8}
-                  disabled={!currentRouteId}
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M12 14C13.66 14 15 12.66 15 11V5C15 3.34 13.66 2 12 2C10.34 2 9 3.34 9 5V11C9 12.66 10.34 14 12 14Z"
-                      fill={isRecording ? "#FFFFFF" : "#000000"}
-                    />
-                    <path
-                      d="M17 11C17 13.76 14.76 16 12 16C9.24 16 7 13.76 7 11H5C5 14.53 7.61 17.43 11 17.92V21H13V17.92C16.39 17.43 19 14.53 19 11H17Z"
-                      fill={isRecording ? "#FFFFFF" : "#000000"}
-                    />
-                  </svg>
-                </TouchableOpacity>
-              </Animated.View>
-            )}
-          </View>
-        </Animated.View>
+          </Animated.View>
+        )}
       </View>
     </View>
   );
@@ -944,13 +1224,18 @@ const styles = StyleSheet.create({
   },
   routeInputContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 25,
-    overflow: 'hidden',
+    borderRadius: 20,
+    overflow: 'visible',
     elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)',
+      },
+    }),
   },
   inputWrapper: {
     paddingHorizontal: 20,
@@ -1256,5 +1541,496 @@ const styles = StyleSheet.create({
   },
   chatBubbleTextUser: {
     color: '#000000',
+  },
+  routeDetailsWrapper: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 220 : 200,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 4,
+  },
+  routeDetailsScroll: {
+    flex: 1,
+  },
+  routeDetailsContent: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  journeyTimeline: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 12,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.15)',
+      },
+    }),
+  },
+  timelineStep: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  timelineIconContainer: {
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  timelineIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: '#E0E0E0',
+  },
+  timelineContent: {
+    flex: 1,
+    paddingTop: 4,
+  },
+  timelineTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+    fontFamily: 'Inter, sans-serif',
+  },
+  timelineSubtitle: {
+    fontSize: 13,
+    color: '#666666',
+    marginBottom: 2,
+    fontFamily: 'Inter, sans-serif',
+  },
+  timelineTime: {
+    fontSize: 12,
+    color: '#888888',
+    fontFamily: 'Inter, sans-serif',
+  },
+  busLineTag: {
+    backgroundColor: '#8B5CF6',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  busLineTagText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: 'Inter, sans-serif',
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  scheduleLabel: {
+    fontSize: 13,
+    color: '#666666',
+    marginRight: 6,
+    fontFamily: 'Inter, sans-serif',
+  },
+  scheduleTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+    fontFamily: 'Inter, sans-serif',
+  },
+  delayInfoContainer: {
+    marginTop: 6,
+    gap: 6,
+  },
+  delayTag: {
+    backgroundColor: '#E0F2FE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  delayTagText: {
+    fontSize: 12,
+    color: '#0369A1',
+    fontWeight: '600',
+    fontFamily: 'Inter, sans-serif',
+  },
+  predictedTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  predictedLabel: {
+    fontSize: 12,
+    color: '#92400E',
+    marginRight: 6,
+    fontFamily: 'Inter, sans-serif',
+  },
+  predictedTime: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#B45309',
+    fontFamily: 'Inter, sans-serif',
+  },
+  journeySummary: {
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderRadius: 20,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+      },
+    }),
+  },
+  summaryItem: {
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: '#AAAAAA',
+    marginBottom: 4,
+    fontFamily: 'Inter, sans-serif',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  summaryValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'Inter, sans-serif',
+  },
+  journeySummaryCompact: {
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        cursor: 'pointer',
+      },
+    }),
+  },
+  summaryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  summaryTimeText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+    fontFamily: 'Inter, sans-serif',
+  },
+  summaryDelayText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E63946',
+    fontFamily: 'Inter, sans-serif',
+  },
+  expandIconText: {
+    fontSize: 16,
+    color: '#666666',
+    fontFamily: 'Inter, sans-serif',
+  },
+  timelineStepClickable: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  timelineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  timelineExpandIcon: {
+    fontSize: 12,
+    color: '#999999',
+    marginLeft: 8,
+  },
+  noDelayText: {
+    fontSize: 12,
+    color: '#10B981',
+    fontFamily: 'Inter, sans-serif',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  stationsListContainer: {
+    marginTop: 12,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 12,
+  },
+  stationsListTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 8,
+    fontFamily: 'Inter, sans-serif',
+  },
+  stationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  stationDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#D1D5DB',
+    marginRight: 12,
+  },
+  stationDotBoarding: {
+    backgroundColor: '#8B5CF6',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  stationDotExit: {
+    backgroundColor: '#10B981',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  stationInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  stationName: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontFamily: 'Inter, sans-serif',
+    flex: 1,
+  },
+  stationNameBold: {
+    fontWeight: '700',
+    color: '#111827',
+  },
+  stationTime: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontFamily: 'Inter, sans-serif',
+  },
+  popupOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+    paddingHorizontal: 20,
+  },
+  popupContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    width: '100%',
+    maxWidth: 400,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+      },
+    }),
+  },
+  popupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  popupTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+    fontFamily: 'Inter, sans-serif',
+    flex: 1,
+  },
+  popupCloseButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
+  },
+  popupCloseText: {
+    fontSize: 20,
+    color: '#666666',
+    fontWeight: '300',
+  },
+  popupContent: {
+    padding: 20,
+  },
+  popupText: {
+    fontSize: 15,
+    color: '#333333',
+    lineHeight: 22,
+    marginBottom: 16,
+    fontFamily: 'Inter, sans-serif',
+  },
+  popupTextBold: {
+    fontWeight: '700',
+    color: '#000000',
+  },
+  popupInfoBox: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  popupInfoTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000000',
+    marginBottom: 12,
+    fontFamily: 'Inter, sans-serif',
+  },
+  popupInfoText: {
+    fontSize: 13,
+    color: '#555555',
+    lineHeight: 20,
+    marginBottom: 6,
+    fontFamily: 'Inter, sans-serif',
+  },
+  popupSubtext: {
+    fontSize: 13,
+    color: '#666666',
+    lineHeight: 20,
+    fontFamily: 'Inter, sans-serif',
+    fontStyle: 'italic',
+  },
+  popupCallToAction: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+    padding: 14,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+  },
+  popupCallToActionText: {
+    fontSize: 14,
+    color: '#92400E',
+    fontWeight: '600',
+    lineHeight: 20,
+    fontFamily: 'Inter, sans-serif',
+  },
+  popupButton: {
+    backgroundColor: '#000000',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    margin: 20,
+    marginTop: 0,
+    alignItems: 'center',
+  },
+  popupButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'Inter, sans-serif',
+  },
+  expectedDepartureSection: {
+    marginTop: 8,
+  },
+  learnMoreContainer: {
+    marginTop: 8,
+    gap: 8,
+  },
+  learnMoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    ...Platform.select({
+      web: {
+        cursor: 'pointer',
+      },
+    }),
+  },
+  learnMoreIcon: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  learnMoreText: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '600',
+    fontFamily: 'Inter, sans-serif',
+    textDecorationLine: 'underline',
+  },
+  learnMoreTextInline: {
+    fontSize: 12,
+    color: '#059669',
+    fontWeight: '600',
+    fontFamily: 'Inter, sans-serif',
+    textDecorationLine: 'underline',
+    marginLeft: 6,
+  },
+  noDelayContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  aiChatInRoute: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  aiChatLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#666666',
+    marginBottom: 12,
+    fontFamily: 'Inter, sans-serif',
+  },
+  chatHistoryPanel: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#000000',
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.3)',
+      },
+    }),
+  },
+  bottomSummaryBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 20,
+    paddingTop: 10,
+    zIndex: 5,
   },
 });

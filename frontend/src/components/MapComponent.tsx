@@ -8,6 +8,7 @@ interface MapComponentProps {
   zoom?: number;
   useCurrentLocation?: boolean;
   routeData?: any;
+  userLocation?: { lat: number; lng: number } | null;
 }
 
 // Mock route data - will be replaced with backend data later
@@ -30,7 +31,8 @@ export default function MapComponent({
   center = { lat: 50.0647, lng: 19.9450 },
   zoom = 13,
   useCurrentLocation = false,
-  routeData = null
+  routeData = null,
+  userLocation = null
 }: MapComponentProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const googleMapRef = useRef<google.maps.Map | null>(null);
@@ -38,6 +40,7 @@ export default function MapComponent({
   const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
   const directionsRenderersRef = useRef<google.maps.DirectionsRenderer[]>([]);
   const markersRef = useRef<google.maps.Marker[]>([]);
+  const userLocationMarkerRef = useRef<google.maps.Marker | null>(null);
 
   useEffect(() => {
     // Get user's current location
@@ -529,6 +532,44 @@ export default function MapComponent({
       }
     };
   }, [currentLocation, zoom]);
+
+  // Display user location marker when userLocation prop changes
+  useEffect(() => {
+    if (!googleMapRef.current) return;
+
+    // Remove existing user location marker if it exists
+    if (userLocationMarkerRef.current) {
+      userLocationMarkerRef.current.setMap(null);
+      userLocationMarkerRef.current = null;
+    }
+
+    // Add new user location marker if userLocation is provided
+    if (userLocation) {
+      console.log('Adding user location marker at:', userLocation);
+
+      const marker = new google.maps.Marker({
+        position: userLocation,
+        map: googleMapRef.current,
+        title: 'Your Current Location',
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 12,
+          fillColor: '#FF5722',
+          fillOpacity: 1,
+          strokeColor: '#FFFFFF',
+          strokeWeight: 3,
+        },
+        animation: google.maps.Animation.DROP,
+        zIndex: 1000,
+      });
+
+      userLocationMarkerRef.current = marker;
+
+      // Center map on user location
+      googleMapRef.current.panTo(userLocation);
+      googleMapRef.current.setZoom(15);
+    }
+  }, [userLocation]);
 
   // Re-draw routes when routeData changes
   useEffect(() => {
