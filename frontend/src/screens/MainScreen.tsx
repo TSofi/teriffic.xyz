@@ -14,6 +14,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import MapComponent from '../components/MapComponent';
 import { aiService, reverseGeocode, geocodeAddress, planRoute } from '../services/aiService';
+import { notificationService, Notification } from '../services/notificationService';
+import NotificationToast from '../components/NotificationToast';
 
 type MainScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -47,6 +49,7 @@ export default function MainScreen({ navigation }: Props) {
   const [destinationSuggestions, setDestinationSuggestions] = useState<any[]>([]);
   const [showArrivalSuggestions, setShowArrivalSuggestions] = useState(false);
   const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
+  const [currentNotification, setCurrentNotification] = useState<Notification | null>(null);
   const conversationIdRef = useRef<string | undefined>(undefined);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -93,6 +96,23 @@ export default function MainScreen({ navigation }: Props) {
     }, 1000);
 
     return () => clearInterval(checkInterval);
+  }, []);
+
+  useEffect(() => {
+    // Connect to notification stream
+    notificationService.connect();
+
+    // Subscribe to notifications
+    const unsubscribe = notificationService.onNotification((notification) => {
+      console.log('New notification received:', notification);
+      setCurrentNotification(notification);
+    });
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribe();
+      notificationService.disconnect();
+    };
   }, []);
 
   const busLines = [
@@ -443,6 +463,12 @@ export default function MainScreen({ navigation }: Props) {
   return (
     <View style={[styles.webContainer, isWeb && styles.webCentered]}>
       <View style={[styles.container, isWeb && styles.mobileFrame]}>
+        {/* Notification Toast */}
+        <NotificationToast
+          notification={currentNotification}
+          onDismiss={() => setCurrentNotification(null)}
+        />
+
         {/* Google Maps Background */}
         <View style={styles.map}>
           <MapComponent
