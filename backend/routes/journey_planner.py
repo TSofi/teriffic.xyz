@@ -10,7 +10,7 @@ from db import supabase
 
 router = APIRouter()
 
-LINE_NUMBERS = ["2", "19", "20"]
+LINE_NUMBERS = ["2", "19", "20", "52", "10"]
 
 # Cache stations to avoid refetching on every request
 _stations_cache = None
@@ -219,47 +219,22 @@ async def plan_journey(request: JourneyRequest):
         user_departure_time = datetime.fromisoformat(request.departure_time)
 
         # Get all stations
-        stations_start = time.time()
         all_stations = get_all_stations()
-        print(f"⏱️ Get all stations: {time.time() - stations_start:.2f}s")
-
-        # Get stations used by our lines
-        line_stations_start = time.time()
         line_station_ids = get_stations_for_lines(LINE_NUMBERS)
         line_stations = [s for s in all_stations if s['id'] in line_station_ids]
-        print(f"⏱️ Get line stations: {time.time() - line_stations_start:.2f}s")
 
-        # Find closest departure station
+        # Find closest departure station (globally across all lines)
         dep_search_start = time.time()
         departure_result = find_closest_station(
             request.start_latitude,
             request.start_longitude,
             line_stations
         )
-        print(f"⏱️ Find departure station: {time.time() - dep_search_start:.2f}s")
 
         if not departure_result:
             raise HTTPException(status_code=404, detail="No departure station found")
 
         print(f"DEBUG: Departure station: {departure_result['station']['name']} (ID: {departure_result['station']['id']}) - Distance: {departure_result['distance_km']:.2f}km")
-
-        # Find closest arrival station
-        arr_search_start = time.time()
-        arrival_result = find_closest_station(
-            request.destination_latitude,
-            request.destination_longitude,
-            line_stations
-        )
-        print(f"⏱️ Find arrival station: {time.time() - arr_search_start:.2f}s")
-
-        if not arrival_result:
-            raise HTTPException(status_code=404, detail="No arrival station found")
-
-        print(f"DEBUG: Arrival station: {arrival_result['station']['name']} (ID: {arrival_result['station']['id']}) - Distance: {arrival_result['distance_km']:.2f}km")
-
-        # Check if it's the same station
-        if departure_result['station']['id'] == arrival_result['station']['id']:
-            raise HTTPException(status_code=400, detail="Departure and arrival stations are the same. You may be very close to your destination - consider walking.")
 
         # Calculate when user arrives at departure station
         user_arrival_at_station = user_departure_time + timedelta(minutes=departure_result['walking_time_minutes'])
@@ -267,22 +242,81 @@ async def plan_journey(request: JourneyRequest):
         print(f"DEBUG: User departure time: {user_departure_time}")
         print(f"DEBUG: User arrives at station: {user_arrival_at_station}")
 
-        # Find best route
+        # Now for each line, find the closest arrival station on that line
+        best_route = None
+        best_total_time = float('inf')
+        best_arrival_result = None
+
         route_search_start = time.time()
-        best_route = find_best_route(
-            departure_result['station']['id'],
-            arrival_result['station']['id'],
-            user_arrival_at_station,
-            LINE_NUMBERS
-        )
+
+        for line_number in LINE_NUMBERS:
+            # Get stations for this specific line only
+            line_specific_station_ids = get_stations_for_lines([line_number])
+            line_specific_stations = [s for s in all_stations if s['id'] in line_specific_station_ids]
+
+            # Find closest arrival station on this line
+            arrival_result = find_closest_station(
+                request.destination_latitude,
+                request.destination_longitude,
+                line_specific_stations
+            )
+
+            if not arrival_result:
+                print(f"DEBUG: No arrival station found for line {line_number}")
+                continue
+
+            # Check if it's the same station
+            if departure_result['station']['id'] == arrival_result['station']['id']:
+                print(f"DEBUG: Line {line_number} - Departure and arrival stations are the same, skipping")
+                continue
+
+            print(f"DEBUG: Line {line_number} - Trying route from {departure_result['station']['name']} to {arrival_result['station']['name']}")
+
+            # Try to find route between these stations on this line
+            route = find_best_route(
+                departure_result['station']['id'],
+                arrival_result['station']['id'],
+                user_arrival_at_station,
+                [line_number]  # Only search this specific line
+            )
+
+            if route:
+                # Calculate total journey time for comparison
+                bus_departure = datetime.strptime(route['route']['stations_info'][route['departure_index']]["departure_time"], "%Y-%m-%d %H:%M:%S")
+                bus_arrival = datetime.strptime(route['route']['stations_info'][route['arrival_index']]["arrival_time"], "%Y-%m-%d %H:%M:%S")
+
+                # Calculate walking time from arrival station to destination
+                walking_from_arrival_distance = haversine_distance(
+                    arrival_result['station']['latitude'], arrival_result['station']['longitude'],
+                    request.destination_latitude, request.destination_longitude
+                )
+                walking_from_arrival_time = calculate_walking_time(walking_from_arrival_distance)
+
+                total_time = (
+                    departure_result['walking_time_minutes'] +
+                    route['waiting_time_minutes'] +
+                    (bus_arrival - bus_departure).total_seconds() / 60 +
+                    walking_from_arrival_time
+                )
+
+                print(f"DEBUG: Line {line_number} - Found route with total time: {total_time:.2f} minutes")
+
+                if total_time < best_total_time:
+                    best_total_time = total_time
+                    best_route = route
+                    best_arrival_result = arrival_result
+
         print(f"⏱️ Find best route: {time.time() - route_search_start:.2f}s")
 
         if not best_route:
-            print(f"DEBUG: No route found between station {departure_result['station']['id']} and {arrival_result['station']['id']}")
+            print(f"DEBUG: No route found from station {departure_result['station']['id']} to destination")
             raise HTTPException(
                 status_code=404,
                 detail="No route found connecting these stations"
             )
+
+        # Use the best route and arrival result found
+        arrival_result = best_arrival_result
 
         # Extract route details
         route = best_route['route']
