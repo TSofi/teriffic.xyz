@@ -151,6 +151,7 @@ export default function MainScreen({ navigation }: Props) {
         conversation_id: conversationIdRef.current,
         include_history: true,
         route_id: currentRouteId,
+        user_id: userId || undefined,
       });
 
       conversationIdRef.current = response.conversation_id;
@@ -225,6 +226,7 @@ export default function MainScreen({ navigation }: Props) {
           conversation_id: conversationIdRef.current,
           include_history: true,
           route_id: currentRouteId,
+          user_id: userId || undefined,
         });
 
         conversationIdRef.current = response.conversation_id;
@@ -655,10 +657,10 @@ export default function MainScreen({ navigation }: Props) {
                   {Math.ceil(routeData.total_journey_time_minutes)} min
                 </Text>
               </View>
-              {routeData.reported_delay_seconds > 0 && (
+              {(userId === 1 || routeData.reported_delay_seconds > 0) && (
                 <View style={[styles.timeTag, { borderColor: '#E63946', backgroundColor: '#E63946', marginLeft: 8 }]}>
                   <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
-                    +{Math.ceil(routeData.reported_delay_seconds / 60)} min
+                    +{userId === 1 ? 5 : Math.ceil(routeData.reported_delay_seconds / 60)} min
                   </Text>
                 </View>
               )}

@@ -145,7 +145,8 @@ class ToolExecutor:
         issue: str,
         route: str = None,
         delay: int = None,
-        route_id: int = None
+        route_id: int = None,
+        user_id: int = None
     ) -> Dict[str, Any]:
         """Record a new bus delay/issue report."""
         success = await self.db.create_bus_report(
@@ -153,7 +154,8 @@ class ToolExecutor:
             station_id=station_id,
             route=route or (str(route_id) if route_id else None),
             delay=delay,
-            issue=issue
+            issue=issue,
+            user_id=user_id or 1
         )
 
         if success:

@@ -70,7 +70,7 @@ export default function LoginScreen({ navigation }: Props) {
           onPress={handleGuest2Login}
           activeOpacity={0.8}
         >
-          <Text style={styles.loginButtonText}>Guest 2</Text>
+          <Text style={styles.loginButtonText}>Login as Guest 2</Text>
           <View style={styles.arrow}>
             <Text style={styles.arrowText}>›</Text>
           </View>

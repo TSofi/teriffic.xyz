@@ -8,6 +8,7 @@ export interface ChatRequest {
   conversation_id?: string;
   include_history?: boolean;
   route_id?: number;
+  user_id?: number;
 }
 
 export interface ChatResponse {

@@ -187,8 +187,8 @@ async def chat(request: ChatRequest):
             "content": request.message
         })
 
-        # Get LLM response with route_id context
-        result = await llm_service.chat(messages, route_id=request.route_id)
+        # Get LLM response with route_id and user_id context
+        result = await llm_service.chat(messages, route_id=request.route_id, user_id=request.user_id)
 
         # Save conversation
         await conversation_manager.add_message(

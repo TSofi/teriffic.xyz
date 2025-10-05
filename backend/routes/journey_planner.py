@@ -391,12 +391,12 @@ async def plan_journey(request: JourneyRequest):
         print(f"DEBUG: Historical data - {len(historical_delays_departure)} past departures, avg delay: {avg_departure_delay_sec} sec")
 
         # Check for user-reported delays on this route
-        # Look for reports with status verified (true) or null for this route
+        # Look for reports with status "verified" for this route
         # where the reported station is before the user's departure station
         reported_delay_seconds = 0
 
         try:
-            reports_response = supabase.table("reports").select("*").eq("route", route['id']).in_("status", [True, None]).execute()
+            reports_response = supabase.table("reports").select("*").eq("route", route['id']).eq("status", "verified").execute()
 
             if reports_response.data:
                 for report in reports_response.data:

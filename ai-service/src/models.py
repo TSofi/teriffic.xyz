@@ -16,6 +16,7 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Conversation ID for context")
     include_history: bool = Field(True, description="Include conversation history")
     route_id: Optional[int] = Field(None, description="Route ID for context-aware responses")
+    user_id: Optional[int] = Field(None, description="User ID for tracking reports")
 
 
 class SimpleQueryRequest(BaseModel):

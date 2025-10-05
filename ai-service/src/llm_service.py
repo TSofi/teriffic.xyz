@@ -26,7 +26,8 @@ class LLMService:
         self,
         messages: List[Dict[str, str]],
         max_iterations: int = 5,
-        route_id: Optional[int] = None
+        route_id: Optional[int] = None,
+        user_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Process chat with automatic tool calling.
@@ -83,9 +84,12 @@ class LLMService:
                         function_name = tool_call.function.name
                         function_args = json.loads(tool_call.function.arguments)
 
-                        # Inject route_id if provided and tool is report_bus_delay
-                        if route_id and function_name == "report_bus_delay":
-                            function_args["route_id"] = route_id
+                        # Inject route_id and user_id if provided and tool is report_bus_delay
+                        if function_name == "report_bus_delay":
+                            if route_id:
+                                function_args["route_id"] = route_id
+                            if user_id:
+                                function_args["user_id"] = user_id
 
                         logger.info(f"Executing tool: {function_name} with args: {function_args}")
 
