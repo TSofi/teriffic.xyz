@@ -100,29 +100,30 @@ export default function MainScreen({ navigation }: Props) {
     return () => clearInterval(checkInterval);
   }, []);
 
-  useEffect(() => {
-    // Only connect if userId is set
-    if (userId === null) {
-      console.log('No userId set, skipping notification service');
-      return;
-    }
+  // Notification service disabled - uncomment to re-enable
+  // useEffect(() => {
+  //   // Only connect if userId is set
+  //   if (userId === null) {
+  //     console.log('No userId set, skipping notification service');
+  //     return;
+  //   }
 
-    // Set user ID in notification service and connect
-    notificationService.setUserId(userId);
-    notificationService.connect();
+  //   // Set user ID in notification service and connect
+  //   notificationService.setUserId(userId);
+  //   notificationService.connect();
 
-    // Subscribe to notifications
-    const unsubscribe = notificationService.onNotification((notification) => {
-      console.log('New notification received:', notification);
-      setCurrentNotification(notification);
-    });
+  //   // Subscribe to notifications
+  //   const unsubscribe = notificationService.onNotification((notification) => {
+  //     console.log('New notification received:', notification);
+  //     setCurrentNotification(notification);
+  //   });
 
-    // Cleanup on unmount
-    return () => {
-      unsubscribe();
-      notificationService.disconnect();
-    };
-  }, [userId]);
+  //   // Cleanup on unmount
+  //   return () => {
+  //     unsubscribe();
+  //     notificationService.disconnect();
+  //   };
+  // }, [userId]);
 
   const busLines = [
     { number: '999', color: ['#E63946', '#DC2F02'] },
