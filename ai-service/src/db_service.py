@@ -61,7 +61,7 @@ class DatabaseService:
         self,
         bus_number: str,
         station_id: str,
-        status: str,
+        issue: str,
         route: Optional[str] = None,
         delay: Optional[int] = None,
         user_id: int = 1  # Default user_id, should be replaced with actual user auth
@@ -72,7 +72,7 @@ class DatabaseService:
         Args:
             bus_number: Bus number (e.g., '999')
             station_id: Station ID
-            status: Status (delayed, on_time, cancelled, etc.)
+            issue: Issue description (delayed, cancelled, crowded, etc.)
             route: Optional route/line name
             delay: Optional delay in minutes
             user_id: User ID (default 1 for anonymous)
@@ -87,7 +87,7 @@ class DatabaseService:
                 "user_id": user_id,
                 "bus_number": bus_number,
                 "station_id": station_id,
-                "status": status,
+                "issue": issue,
                 "reported_time": datetime.now(timezone.utc).isoformat()
             }
 
@@ -99,7 +99,7 @@ class DatabaseService:
 
             response = self.client.table('reports').insert(data).execute()
 
-            logger.info(f"Report created: bus_number={bus_number}, station={station_id}, status={status}")
+            logger.info(f"Report created: bus_number={bus_number}, station={station_id}, issue={issue}")
             return True
 
         except Exception as e:

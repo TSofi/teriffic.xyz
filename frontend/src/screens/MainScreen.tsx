@@ -40,6 +40,7 @@ export default function MainScreen({ navigation }: Props) {
   const [isRecording, setIsRecording] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(false);
   const [routeData, setRouteData] = useState<any>(null);
+  const [currentRouteId, setCurrentRouteId] = useState<number | undefined>(undefined);
   const [isSearchingRoute, setIsSearchingRoute] = useState(false);
   const [isFindingLocation, setIsFindingLocation] = useState(false);
   const [arrivalSuggestions, setArrivalSuggestions] = useState<any[]>([]);
@@ -120,6 +121,7 @@ export default function MainScreen({ navigation }: Props) {
         message: chatMessage,
         conversation_id: conversationIdRef.current,
         include_history: true,
+        route_id: currentRouteId,
       });
 
       conversationIdRef.current = response.conversation_id;
@@ -193,6 +195,7 @@ export default function MainScreen({ navigation }: Props) {
           message: transcription.text,
           conversation_id: conversationIdRef.current,
           include_history: true,
+          route_id: currentRouteId,
         });
 
         conversationIdRef.current = response.conversation_id;
@@ -367,27 +370,71 @@ export default function MainScreen({ navigation }: Props) {
       const now = new Date();
       const departureTime = now.toISOString().slice(0, 19);
 
-      // Call route service
-      const route = await planRoute({
-        start_latitude: startCoords.lat,
-        start_longitude: startCoords.lng,
-        destination_latitude: destCoords.lat,
-        destination_longitude: destCoords.lng,
-        departure_time: departureTime,
-      });
+      try {
+        // Try to call route service
+        const route = await planRoute({
+          start_latitude: startCoords.lat,
+          start_longitude: startCoords.lng,
+          destination_latitude: destCoords.lat,
+          destination_longitude: destCoords.lng,
+          departure_time: departureTime,
+        });
 
-      // Add user's original coordinates to route data for walking segments
-      const enrichedRoute = {
-        ...route,
-        user_start_location: startCoords,
-        user_end_location: destCoords,
-      };
+        // Add user's original coordinates to route data for walking segments
+        const enrichedRoute = {
+          ...route,
+          user_start_location: startCoords,
+          user_end_location: destCoords,
+        };
 
-      setRouteData(enrichedRoute);
-      console.log('Route planned successfully:', enrichedRoute);
+        setRouteData(enrichedRoute);
+        setCurrentRouteId(route.route_id); // Store route_id for AI chat
+        console.log('Route planned successfully:', enrichedRoute);
+        console.log('Route ID:', route.route_id);
+      } catch (routeError: any) {
+        console.error('Route service error:', routeError);
+
+        // If route service fails (404 or any error), fallback to walking route using Google Maps Directions
+        console.log('Falling back to walking route via Google Maps');
+
+        // Calculate walking distance using haversine formula
+        const R = 6371; // Earth radius in km
+        const dLat = (destCoords.lat - startCoords.lat) * Math.PI / 180;
+        const dLon = (destCoords.lng - startCoords.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(startCoords.lat * Math.PI / 180) * Math.cos(destCoords.lat * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = R * c; // Distance in km
+
+        // Average walking speed: 5 km/h
+        const walkingTime = (distance / 5) * 60; // Time in minutes
+
+        // Create a fallback walking-only route
+        const walkingRoute = {
+          departure_station: null,
+          arrival_station: null,
+          line_number: null,
+          route_id: null,
+          bus_stations: [],
+          walking_to_departure_time_minutes: walkingTime,
+          walking_to_departure_distance_km: distance,
+          walking_from_arrival_time_minutes: 0,
+          walking_from_arrival_distance_km: 0,
+          total_journey_time_minutes: walkingTime,
+          total_waiting_time_minutes: 0,
+          user_start_location: startCoords,
+          user_end_location: destCoords,
+          is_walking_only: true, // Flag to identify walking-only routes
+        };
+
+        setRouteData(walkingRoute);
+        setCurrentRouteId(undefined); // No route_id for walking routes
+        console.log('Walking route created:', walkingRoute);
+      }
     } catch (error) {
-      console.error('Route search error:', error);
-      alert('Could not plan route. Please try again.');
+      console.error('Geocoding or general error:', error);
+      alert('Could not find addresses. Please try again.');
     } finally {
       setIsSearchingRoute(false);
     }
@@ -568,19 +615,9 @@ export default function MainScreen({ navigation }: Props) {
         {routeData && (
           <View style={styles.timeInfoWrapper}>
             <View style={styles.timeInfoContainer}>
-              <View style={[styles.timeTag, { borderColor: '#06B6D4' }]}>
-                <Text style={[styles.timeTagText, { color: '#06B6D4' }]}>
-                  {Math.ceil(routeData.walking_to_departure_time_minutes)} min
-                </Text>
-              </View>
               <View style={[styles.timeTag, { borderColor: '#000000', backgroundColor: '#000000' }]}>
                 <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
                   {Math.ceil(routeData.total_journey_time_minutes)} min
-                </Text>
-              </View>
-              <View style={[styles.timeTag, { borderColor: '#10B981' }]}>
-                <Text style={[styles.timeTagText, { color: '#10B981' }]}>
-                  {Math.ceil(routeData.walking_from_arrival_time_minutes)} min
                 </Text>
               </View>
             </View>
@@ -734,19 +771,19 @@ export default function MainScreen({ navigation }: Props) {
           {/* AI Chat Section */}
           <View style={styles.chatSection}>
             <TextInput
-              style={styles.chatInput}
-              placeholder="Ask AI assistant..."
+              style={[styles.chatInput, !currentRouteId && styles.chatInputDisabled]}
+              placeholder={currentRouteId ? "Ask AI assistant..." : "Generate a route first..."}
               placeholderTextColor="#666"
               value={chatMessage}
               onChangeText={setChatMessage}
               multiline
-              editable={!isLoading}
+              editable={!isLoading && !!currentRouteId}
             />
             {isLoading ? (
               <View style={styles.actionButton}>
                 <ActivityIndicator size="small" color="#000000" />
               </View>
-            ) : chatMessage.trim().length > 0 ? (
+            ) : chatMessage.trim().length > 0 && currentRouteId ? (
               <Animated.View style={{ opacity: iconOpacityAnim }}>
                 <TouchableOpacity
                   style={styles.actionButton}
@@ -764,9 +801,14 @@ export default function MainScreen({ navigation }: Props) {
             ) : (
               <Animated.View style={{ opacity: iconOpacityAnim }}>
                 <TouchableOpacity
-                  style={[styles.actionButton, isRecording && styles.actionButtonRecording]}
-                  onPress={handleVoiceRecord}
+                  style={[
+                    styles.actionButton,
+                    isRecording && styles.actionButtonRecording,
+                    !currentRouteId && styles.actionButtonDisabled
+                  ]}
+                  onPress={currentRouteId ? handleVoiceRecord : undefined}
                   activeOpacity={0.8}
+                  disabled={!currentRouteId}
                 >
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
                     <path
@@ -1095,6 +1137,10 @@ const styles = StyleSheet.create({
     maxHeight: 100,
     fontFamily: 'Inter, sans-serif',
   },
+  chatInputDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#0F0F0F',
+  },
   actionButton: {
     width: 50,
     height: 50,
@@ -1110,6 +1156,10 @@ const styles = StyleSheet.create({
   },
   actionButtonRecording: {
     backgroundColor: '#E63946',
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#CCCCCC',
   },
   chatHistorySection: {
     flex: 1,

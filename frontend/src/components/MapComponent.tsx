@@ -541,6 +541,13 @@ export default function MapComponent({
         markersRef.current.forEach(marker => marker.setMap(null));
         markersRef.current = [];
 
+        // Check if this is a walking-only route (fallback)
+        if (routeData.is_walking_only) {
+          console.log('Drawing walking-only route');
+          drawWalkingOnlyRoute();
+          return;
+        }
+
         // Use backend route data if available
         const useBackendData = routeData && routeData.bus_stations;
 
@@ -554,6 +561,81 @@ export default function MapComponent({
         // Draw real route from backend
         console.log('Drawing backend route...');
         drawBackendRoute();
+      };
+
+      const drawWalkingOnlyRoute = () => {
+        if (!routeData || !googleMapRef.current || !directionsServiceRef.current) return;
+
+        const userStartLocation = routeData.user_start_location;
+        const userEndLocation = routeData.user_end_location;
+
+        console.log('Drawing walking route from', userStartLocation, 'to', userEndLocation);
+
+        // Single walking route: Start → End
+        const walkingRenderer = new google.maps.DirectionsRenderer({
+          map: googleMapRef.current,
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: '#06B6D4', // Blue for walking
+            strokeWeight: 4,
+            strokeOpacity: 0.8,
+            geodesic: true,
+          },
+        });
+
+        directionsServiceRef.current!.route(
+          {
+            origin: userStartLocation,
+            destination: userEndLocation,
+            travelMode: google.maps.TravelMode.WALKING,
+          },
+          (result, status) => {
+            if (status === 'OK' && result) {
+              walkingRenderer.setDirections(result);
+            } else {
+              console.error('Walking directions failed:', status);
+            }
+          }
+        );
+
+        directionsRenderersRef.current.push(walkingRenderer);
+
+        // Add markers
+        const startMarker = new google.maps.Marker({
+          position: userStartLocation,
+          map: googleMapRef.current,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#06B6D4',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 2,
+          },
+          title: 'Start',
+        });
+
+        const endMarker = new google.maps.Marker({
+          position: userEndLocation,
+          map: googleMapRef.current,
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#10B981',
+            fillOpacity: 1,
+            strokeColor: '#FFFFFF',
+            strokeWeight: 2,
+          },
+          title: 'Destination',
+        });
+
+        markersRef.current.push(startMarker, endMarker);
+
+        // Fit bounds
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend(userStartLocation);
+        bounds.extend(userEndLocation);
+        googleMapRef.current.fitBounds(bounds);
       };
 
       const drawBackendRoute = () => {

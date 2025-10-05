@@ -163,10 +163,14 @@ async def chat(request: ChatRequest):
         # Build messages
         messages = []
 
-        # Add system prompt
+        # Add system prompt with route context if provided
+        system_prompt = llm_service.build_system_prompt()
+        if request.route_id:
+            system_prompt += f"\n\nContext: The user is currently viewing route ID {request.route_id}. Use this route ID when recording reports."
+
         messages.append({
             "role": "system",
-            "content": llm_service.build_system_prompt()
+            "content": system_prompt
         })
 
         # Add conversation history if requested
@@ -183,8 +187,8 @@ async def chat(request: ChatRequest):
             "content": request.message
         })
 
-        # Get LLM response
-        result = await llm_service.chat(messages)
+        # Get LLM response with route_id context
+        result = await llm_service.chat(messages, route_id=request.route_id)
 
         # Save conversation
         await conversation_manager.add_message(

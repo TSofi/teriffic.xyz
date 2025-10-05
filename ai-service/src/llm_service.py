@@ -25,7 +25,8 @@ class LLMService:
     async def chat(
         self,
         messages: List[Dict[str, str]],
-        max_iterations: int = 5
+        max_iterations: int = 5,
+        route_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Process chat with automatic tool calling.
@@ -81,6 +82,10 @@ class LLMService:
                     for tool_call in assistant_message.tool_calls:
                         function_name = tool_call.function.name
                         function_args = json.loads(tool_call.function.arguments)
+
+                        # Inject route_id if provided and tool is report_bus_delay
+                        if route_id and function_name == "report_bus_delay":
+                            function_args["route_id"] = route_id
 
                         logger.info(f"Executing tool: {function_name} with args: {function_args}")
 
@@ -176,7 +181,7 @@ When users ASK about a bus (e.g., "How is bus 999 at station XXX?"):
 
 When users REPORT a delay/issue (e.g., "Bus 999 is delayed at station XXX"):
 - Use report_bus_delay tool to record the report
-- Extract: bus_number (e.g., "999"), station_id, status (delayed/on_time/cancelled/crowded)
+- Extract: bus_number (e.g., "999"), station_id, issue (delayed/cancelled/crowded/broken/dirty)
 - Extract delay in minutes if mentioned
 - Extract route/line name if mentioned (optional)
 - Confirm the report was recorded

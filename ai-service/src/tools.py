@@ -35,7 +35,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "report_bus_delay",
-            "description": "Record a user report about bus delay, cancellation, or status at a station. Use this when user reports an issue like 'Bus 999 is delayed' or 'Bus is late at station XXX'.",
+            "description": "Record a user report about bus delay, cancellation, or issue at a station. Use this when user reports an issue like 'Bus 999 is delayed' or 'Bus is late at station XXX'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -55,12 +55,12 @@ TOOLS = [
                         "type": "integer",
                         "description": "Delay in minutes (if mentioned, otherwise null)"
                     },
-                    "status": {
+                    "issue": {
                         "type": "string",
-                        "description": "Status: delayed, on_time, cancelled, crowded, etc."
+                        "description": "Issue description: delayed, cancelled, crowded, broken, dirty, etc."
                     }
                 },
-                "required": ["bus_number", "station_id", "status"]
+                "required": ["bus_number", "station_id", "issue"]
             }
         }
     }
@@ -116,8 +116,8 @@ class ToolExecutor:
         delays = [r.get("delay", 0) for r in reports if r.get("delay") is not None]
         avg_delay = sum(delays) / len(delays) if delays else 0
 
-        # Get most recent status
-        latest_status = reports[0].get("status", "unknown") if reports else "unknown"
+        # Get most recent issue
+        latest_issue = reports[0].get("issue", "unknown") if reports else "unknown"
 
         return {
             "bus_number": bus_number,
@@ -125,13 +125,13 @@ class ToolExecutor:
             "route": route,
             "total_reports": len(reports),
             "average_delay_minutes": round(avg_delay, 1),
-            "latest_status": latest_status,
+            "latest_issue": latest_issue,
             "reports": [
                 {
                     "bus_number": r.get("bus_number"),
                     "route": r.get("route"),
                     "delay": r.get("delay"),
-                    "status": r.get("status"),
+                    "issue": r.get("issue"),
                     "reported_time": r.get("reported_time")
                 }
                 for r in reports[:5]  # Return max 5 most recent
@@ -142,17 +142,18 @@ class ToolExecutor:
         self,
         bus_number: str,
         station_id: str,
-        status: str,
+        issue: str,
         route: str = None,
-        delay: int = None
+        delay: int = None,
+        route_id: int = None
     ) -> Dict[str, Any]:
-        """Record a new bus delay/status report."""
+        """Record a new bus delay/issue report."""
         success = await self.db.create_bus_report(
             bus_number=bus_number,
             station_id=station_id,
-            route=route,
+            route=route or (str(route_id) if route_id else None),
             delay=delay,
-            status=status
+            issue=issue
         )
 
         if success:
@@ -162,7 +163,7 @@ class ToolExecutor:
                 "bus_number": bus_number,
                 "station_id": station_id,
                 "route": route,
-                "status": status,
+                "issue": issue,
                 "delay": delay
             }
         else:
