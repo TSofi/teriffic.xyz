@@ -7,9 +7,11 @@ import {
   Platform,
   ScrollView,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { rewardsService, Report, UserProgress } from '../services/rewardsService';
 
 type RewardsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Rewards'>;
 
@@ -20,16 +22,8 @@ type Props = {
 const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
 
-// Mock data
-const initialReports = [
-  { id: 1, date: '2025-01-10', bus: '#999', issue: 'Traffic jam on Main St', status: 'Verified' },
-  { id: 2, date: '2025-01-09', bus: '#704', issue: 'Road closure', status: 'Verified' },
-  { id: 3, date: '2025-01-08', bus: '#111', issue: 'Accident reported', status: 'Verified' },
-  { id: 4, date: '2025-01-07', bus: '#999', issue: 'Bus delay', status: 'Verified' },
-  { id: 5, date: '2025-01-06', bus: '#704', issue: 'Construction zone', status: 'Verified' },
-  { id: 6, date: '2025-01-05', bus: '#111', issue: 'Heavy traffic', status: 'Verified' },
-  { id: 7, date: '2025-01-04', bus: '#999', issue: 'Weather delay', status: 'Verified' },
-];
+// TODO: Replace with actual user authentication
+const CURRENT_USER_ID = 1;
 
 // Calculate level from total reports
 const calculateLevel = (totalReports: number): number => {
@@ -115,7 +109,9 @@ const ConfettiPiece = () => {
 };
 
 export default function RewardsScreen({ navigation }: Props) {
-  const [provenReports, setProvenReports] = useState(initialReports);
+  const [provenReports, setProvenReports] = useState<Report[]>([]);
+  const [userProgress, setUserProgress] = useState<UserProgress | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [showConfetti, setShowConfetti] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [showSpark, setShowSpark] = useState(false);
@@ -123,21 +119,25 @@ export default function RewardsScreen({ navigation }: Props) {
   const notificationAnim = useRef(new Animated.Value(-100)).current;
   const sparkAnim = useRef(new Animated.Value(0)).current;
   const prevLevelRef = useRef(1);
-  const prevTotalReportsRef = useRef(initialReports.length);
+  const prevTotalReportsRef = useRef(0);
 
-  const totalReports = provenReports.length;
-  const currentLevel = calculateLevel(totalReports);
-  const rewardDays = getRewardDays(currentLevel);
+  // Extract values from userProgress or use defaults
+  const currentLevel = userProgress?.current_level || 1;
+  const totalReports = userProgress?.total_verified_reports || 0;
+  const rewardDays = userProgress?.reward_days || 1;
+  const reportsNeededForTicket = userProgress?.reports_for_current_level || 10;
+  const currentTicketProgress = userProgress?.current_progress || 0;
+  const ticketProgressPercentage = userProgress?.progress_percentage || 0;
 
-  // Ticket costs same as reports needed to reach next level
-  // Level 1 → Level 2 = 10 reports, Level 2 → Level 3 = 12 reports, etc.
-  const reportsNeededForTicket = getReportsForLevel(currentLevel);
-  const totalReportsUpToCurrentLevel = getTotalReportsUpToLevel(currentLevel);
-  const currentTicketProgress = totalReports - totalReportsUpToCurrentLevel;
-  const ticketProgressPercentage = (currentTicketProgress / reportsNeededForTicket) * 100;
+  // Fetch data on mount
+  useEffect(() => {
+    loadData();
+  }, []);
 
   // Animate progress bar and detect level up
   useEffect(() => {
+    if (!userProgress) return;
+
     // Animate progress bar
     Animated.timing(progressAnim, {
       toValue: ticketProgressPercentage,
@@ -179,15 +179,43 @@ export default function RewardsScreen({ navigation }: Props) {
     prevTotalReportsRef.current = totalReports;
   }, [totalReports, ticketProgressPercentage, currentLevel]);
 
-  const handleAddReport = () => {
-    const newReport = {
-      id: provenReports.length + 1,
-      date: new Date().toISOString().split('T')[0],
-      bus: '#999',
-      issue: 'Test report',
-      status: 'Verified',
-    };
-    setProvenReports([newReport, ...provenReports]);
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [reports, progress] = await Promise.all([
+        rewardsService.getUserReports(CURRENT_USER_ID, 'verified'),
+        rewardsService.getUserProgress(CURRENT_USER_ID),
+      ]);
+
+      setProvenReports(reports);
+      setUserProgress(progress);
+      prevLevelRef.current = progress.current_level;
+      prevTotalReportsRef.current = progress.total_verified_reports;
+    } catch (error) {
+      console.error('Failed to load rewards data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddReport = async () => {
+    try {
+      // Create a new report
+      const newReport = await rewardsService.createReport({
+        user_id: CURRENT_USER_ID,
+        bus_number: '999',
+        issue: 'Test report',
+        status: 'pending',
+      });
+
+      // Auto-verify it for testing (in production, this would be done by admin)
+      await rewardsService.verifyReport(newReport.id);
+
+      // Reload data to get updated progress
+      await loadData();
+    } catch (error) {
+      console.error('Failed to add report:', error);
+    }
   };
 
   const handleClaimTicket = () => {
@@ -342,22 +370,34 @@ export default function RewardsScreen({ navigation }: Props) {
           <View style={styles.reportsSection}>
             <Text style={styles.reportsTitle}>PROVEN REPORTS</Text>
 
-            {provenReports.map((report) => (
-              <View key={report.id} style={styles.reportRow}>
-                <View style={styles.reportLeft}>
-                  <Text style={styles.reportDate}>{report.date}</Text>
-                  <Text style={styles.reportBus}>{report.bus}</Text>
-                </View>
-                <View style={styles.reportMiddle}>
-                  <Text style={styles.reportIssue}>{report.issue}</Text>
-                </View>
-                <View style={styles.reportRight}>
-                  <View style={styles.verifiedBadge}>
-                    <Text style={styles.verifiedText}>✓</Text>
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+              </View>
+            ) : provenReports.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No reports yet</Text>
+              </View>
+            ) : (
+              provenReports.map((report) => (
+                <View key={report.id} style={styles.reportRow}>
+                  <View style={styles.reportLeft}>
+                    <Text style={styles.reportDate}>
+                      {new Date(report.reported_time).toISOString().split('T')[0]}
+                    </Text>
+                    <Text style={styles.reportBus}>#{report.bus_number}</Text>
+                  </View>
+                  <View style={styles.reportMiddle}>
+                    <Text style={styles.reportIssue}>{report.issue}</Text>
+                  </View>
+                  <View style={styles.reportRight}>
+                    <View style={styles.verifiedBadge}>
+                      <Text style={styles.verifiedText}>✓</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))}
+              ))
+            )}
           </View>
         </ScrollView>
       </View>
@@ -705,6 +745,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FFFFFF',
     fontWeight: 'bold',
+    fontFamily: 'Inter, sans-serif',
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#888888',
     fontFamily: 'Inter, sans-serif',
   },
 });

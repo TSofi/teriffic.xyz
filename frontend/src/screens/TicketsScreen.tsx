@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,12 @@ import {
   StyleSheet,
   Platform,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { rewardsService, Ticket } from '../services/rewardsService';
 
 type TicketsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Tickets'>;
 
@@ -19,45 +22,41 @@ type Props = {
 const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
 
-interface Ticket {
-  id: number;
-  days: number;
-  earnedDate: string;
-  activatedDate?: string;
-  expiryDate?: string;
-  isActive: boolean;
-}
-
-// Mock tickets data
-const initialTickets: Ticket[] = [
-  { id: 1, days: 7, earnedDate: '2025-10-01', isActive: false },
-  { id: 2, days: 5, earnedDate: '2025-09-25', isActive: false },
-  { id: 3, days: 3, earnedDate: '2025-09-20', activatedDate: '2025-09-22', expiryDate: '2025-09-25', isActive: false },
-];
+// TODO: Replace with actual user authentication
+const CURRENT_USER_ID = 1;
 
 export default function TicketsScreen({ navigation }: Props) {
-  const [tickets, setTickets] = useState<Ticket[]>(initialTickets);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const handleActivateTicket = (ticketId: number) => {
-    setTickets(prevTickets =>
-      prevTickets.map(ticket => {
-        if (ticket.id === ticketId && !ticket.isActive && !ticket.activatedDate) {
-          const today = new Date();
-          const activatedDate = today.toISOString().split('T')[0];
-          const expiryDate = new Date(today.getTime() + ticket.days * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .split('T')[0];
+  useEffect(() => {
+    loadTickets();
+  }, []);
 
-          return {
-            ...ticket,
-            isActive: true,
-            activatedDate,
-            expiryDate,
-          };
-        }
-        return ticket;
-      })
-    );
+  const loadTickets = async () => {
+    try {
+      setIsLoading(true);
+      const userTickets = await rewardsService.getUserTickets(CURRENT_USER_ID);
+      setTickets(userTickets);
+    } catch (error) {
+      console.error('Failed to load tickets:', error);
+      Alert.alert('Error', 'Failed to load tickets');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleActivateTicket = async (ticketId: number) => {
+    try {
+      const result = await rewardsService.activateTicket(ticketId);
+      Alert.alert('Success', result.message);
+
+      // Reload tickets to get updated data
+      await loadTickets();
+    } catch (error) {
+      console.error('Failed to activate ticket:', error);
+      Alert.alert('Error', 'Failed to activate ticket. It may already be used or expired.');
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -79,61 +78,65 @@ export default function TicketsScreen({ navigation }: Props) {
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           <View style={styles.ticketsContainer}>
-            {tickets.map((ticket) => (
-              <View key={ticket.id} style={styles.ticketCard}>
-                {/* Ticket Header */}
-                <View style={styles.ticketHeader}>
-                  <Text style={styles.ticketTitle}>
-                    {ticket.days} {ticket.days === 1 ? 'DAY' : ticket.days === 30 ? 'MONTH' : 'DAYS'} FREE PASS
-                  </Text>
-                  {ticket.isActive && (
-                    <View style={styles.activeBadge}>
-                      <Text style={styles.activeBadgeText}>ACTIVE</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Ticket Body */}
-                <View style={styles.ticketBody}>
-                  <Text style={styles.ticketLabel}>Earned on:</Text>
-                  <Text style={styles.ticketDate}>{formatDate(ticket.earnedDate)}</Text>
-
-                  {ticket.activatedDate && (
-                    <>
-                      <View style={styles.dividerSmall} />
-                      <Text style={styles.ticketLabel}>Valid period:</Text>
-                      <Text style={styles.ticketDateRange}>
-                        {formatDate(ticket.activatedDate)} - {formatDate(ticket.expiryDate!)}
-                      </Text>
-                    </>
-                  )}
-                </View>
-
-                {/* Activate Button */}
-                {!ticket.activatedDate && (
-                  <TouchableOpacity
-                    style={styles.activateButton}
-                    onPress={() => handleActivateTicket(ticket.id)}
-                  >
-                    <Text style={styles.activateButtonText}>Activate Now</Text>
-                  </TouchableOpacity>
-                )}
-
-                {ticket.activatedDate && !ticket.isActive && (
-                  <View style={styles.expiredBadge}>
-                    <Text style={styles.expiredText}>EXPIRED</Text>
-                  </View>
-                )}
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
               </View>
-            ))}
-
-            {tickets.length === 0 && (
+            ) : tickets.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyStateText}>No tickets yet</Text>
                 <Text style={styles.emptyStateSubtext}>
                   Earn tickets by submitting verified reports
                 </Text>
               </View>
+            ) : (
+              tickets.map((ticket) => (
+                <View key={ticket.id} style={styles.ticketCard}>
+                  {/* Ticket Header */}
+                  <View style={styles.ticketHeader}>
+                    <Text style={styles.ticketTitle}>
+                      {ticket.days} {ticket.days === 1 ? 'DAY' : ticket.days === 30 ? 'MONTH' : 'DAYS'} FREE PASS
+                    </Text>
+                    {ticket.is_active && (
+                      <View style={styles.activeBadge}>
+                        <Text style={styles.activeBadgeText}>ACTIVE</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Ticket Body */}
+                  <View style={styles.ticketBody}>
+                    <Text style={styles.ticketLabel}>Earned on:</Text>
+                    <Text style={styles.ticketDate}>{formatDate(ticket.earned_date)}</Text>
+
+                    {ticket.activated_date && (
+                      <>
+                        <View style={styles.dividerSmall} />
+                        <Text style={styles.ticketLabel}>Valid period:</Text>
+                        <Text style={styles.ticketDateRange}>
+                          {formatDate(ticket.activated_date)} - {formatDate(ticket.expiry_date!)}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+
+                  {/* Activate Button */}
+                  {ticket.status === 'available' && (
+                    <TouchableOpacity
+                      style={styles.activateButton}
+                      onPress={() => handleActivateTicket(ticket.id)}
+                    >
+                      <Text style={styles.activateButtonText}>Activate Now</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {ticket.status === 'expired' && (
+                    <View style={styles.expiredBadge}>
+                      <Text style={styles.expiredText}>EXPIRED</Text>
+                    </View>
+                  )}
+                </View>
+              ))
             )}
           </View>
         </ScrollView>
@@ -306,5 +309,9 @@ const styles = StyleSheet.create({
     color: '#888888',
     textAlign: 'center',
     fontFamily: 'Inter, sans-serif',
+  },
+  loadingContainer: {
+    paddingTop: 100,
+    alignItems: 'center',
   },
 });

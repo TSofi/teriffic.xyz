@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import asyncio
 from bus_simulator import simulate_bus_movements
 from routes.journey_planner import router as journey_router
+from routes.rewards import router as rewards_router
 
 # @asynccontextmanager
 # async def lifespan(app: FastAPI):
@@ -33,6 +34,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(journey_router, prefix="/api", tags=["Journey Planning"])
+app.include_router(rewards_router, prefix="/api", tags=["Rewards & Tickets"])
 
 @app.get("/health")
 def healthcheck():
