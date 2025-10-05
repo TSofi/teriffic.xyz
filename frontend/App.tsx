@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import AppNavigator from './src/navigation/AppNavigator';
+import { UserProvider } from './src/context/UserContext';
 import './src/styles/fonts.css';
 
 export default function App() {
@@ -11,9 +12,9 @@ export default function App() {
   }, []);
 
   return (
-    <>
+    <UserProvider>
       <StatusBar style="light" />
       <AppNavigator />
-    </>
+    </UserProvider>
   );
 }

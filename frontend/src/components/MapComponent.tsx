@@ -188,11 +188,13 @@ export default function MapComponent({
       directionsRenderersRef.current.push(walkingRenderer1);
 
       // 2. Bus route: First station → through all stations → Last station (SOLID)
+      // Red if reported_delay_seconds > 0, Blue if 0
+      const busColor = (routeData?.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
       const busRenderer = new google.maps.DirectionsRenderer({
         map: googleMapRef.current,
         suppressMarkers: true,
         polylineOptions: {
-          strokeColor: '#E63946', // Red for bus
+          strokeColor: busColor,
           strokeWeight: 6,
           strokeOpacity: 1,
         }
@@ -262,6 +264,7 @@ export default function MapComponent({
 
       markersRef.current.push(marker1);
 
+      const stationColor = (routeData?.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
       const marker2 = new google.maps.Marker({
         position: MOCK_ROUTE.firstStation,
         map: googleMapRef.current,
@@ -269,7 +272,7 @@ export default function MapComponent({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 10,
-          fillColor: '#E63946',
+          fillColor: stationColor,
           fillOpacity: 1,
           strokeColor: '#FFFFFF',
           strokeWeight: 3,
@@ -285,7 +288,7 @@ export default function MapComponent({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 10,
-          fillColor: '#E63946',
+          fillColor: stationColor,
           fillOpacity: 1,
           strokeColor: '#FFFFFF',
           strokeWeight: 3,
@@ -378,13 +381,15 @@ export default function MapComponent({
 
       directionsRenderersRef.current.push(walkingRenderer1);
 
-      // 2. Bus route: First station → through all stations → Last station (SOLID RED)
+      // 2. Bus route: First station → through all stations → Last station (SOLID)
+      // Red if reported_delay_seconds > 0, Blue if 0
       if (busStations.length > 1) {
+        const busColor = (routeData.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
         const busRenderer = new google.maps.DirectionsRenderer({
           map: googleMapRef.current,
           suppressMarkers: true,
           polylineOptions: {
-            strokeColor: '#E63946', // Red for bus
+            strokeColor: busColor,
             strokeWeight: 6,
             strokeOpacity: 1,
           }
@@ -459,6 +464,7 @@ export default function MapComponent({
 
       markersRef.current.push(marker1);
 
+      const stationColor = (routeData.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
       const marker2 = new google.maps.Marker({
         position: firstStation,
         map: googleMapRef.current,
@@ -466,7 +472,7 @@ export default function MapComponent({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 10,
-          fillColor: '#E63946',
+          fillColor: stationColor,
           fillOpacity: 1,
           strokeColor: '#FFFFFF',
           strokeWeight: 3,
@@ -482,7 +488,7 @@ export default function MapComponent({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 10,
-          fillColor: '#E63946',
+          fillColor: stationColor,
           fillOpacity: 1,
           strokeColor: '#FFFFFF',
           strokeWeight: 3,
@@ -727,13 +733,15 @@ export default function MapComponent({
 
         directionsRenderersRef.current.push(walkingRenderer1);
 
-        // 2. Bus route: First station → through all stations → Last station (SOLID RED)
+        // 2. Bus route: First station → through all stations → Last station (SOLID)
+        // Red if reported_delay_seconds > 0, Blue if 0
         if (busStations.length > 1) {
+          const busColor = (routeData.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
           const busRenderer = new google.maps.DirectionsRenderer({
             map: googleMapRef.current,
             suppressMarkers: true,
             polylineOptions: {
-              strokeColor: '#E63946',
+              strokeColor: busColor,
               strokeWeight: 6,
               strokeOpacity: 1,
             }
@@ -807,6 +815,7 @@ export default function MapComponent({
 
         markersRef.current.push(marker1);
 
+        const stationColor = (routeData.reported_delay_seconds || 0) > 0 ? '#E63946' : '#06B6D4';
         const marker2 = new google.maps.Marker({
           position: firstStation,
           map: googleMapRef.current,
@@ -814,7 +823,7 @@ export default function MapComponent({
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
             scale: 10,
-            fillColor: '#E63946',
+            fillColor: stationColor,
             fillOpacity: 1,
             strokeColor: '#FFFFFF',
             strokeWeight: 3,
@@ -830,7 +839,7 @@ export default function MapComponent({
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
             scale: 10,
-            fillColor: '#E63946',
+            fillColor: stationColor,
             fillOpacity: 1,
             strokeColor: '#FFFFFF',
             strokeWeight: 3,

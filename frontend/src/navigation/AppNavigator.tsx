@@ -5,6 +5,7 @@ import LoginScreen from '../screens/LoginScreen';
 import MainScreen from '../screens/MainScreen';
 import RewardsScreen from '../screens/RewardsScreen';
 import TicketsScreen from '../screens/TicketsScreen';
+import { useUser } from '../context/UserContext';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -16,10 +17,12 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
+  const { userId } = useUser();
+
   return (
     <NavigationContainer>
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName={userId ? "Main" : "Login"}
         screenOptions={{
           headerShown: false,
           animation: 'fade',

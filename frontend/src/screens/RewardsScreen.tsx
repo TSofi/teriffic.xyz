@@ -12,6 +12,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { rewardsService, Report, UserProgress } from '../services/rewardsService';
+import { useUser } from '../context/UserContext';
 
 type RewardsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Rewards'>;
 
@@ -21,9 +22,6 @@ type Props = {
 
 const isWeb = Platform.OS === 'web';
 const MOBILE_WIDTH = 585;
-
-// TODO: Replace with actual user authentication
-const CURRENT_USER_ID = 1;
 
 // Calculate level from total reports
 const calculateLevel = (totalReports: number): number => {
@@ -109,6 +107,7 @@ const ConfettiPiece = () => {
 };
 
 export default function RewardsScreen({ navigation }: Props) {
+  const { userId } = useUser();
   const [provenReports, setProvenReports] = useState<Report[]>([]);
   const [userProgress, setUserProgress] = useState<UserProgress | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -129,10 +128,10 @@ export default function RewardsScreen({ navigation }: Props) {
   const currentTicketProgress = userProgress?.current_progress || 0;
   const ticketProgressPercentage = userProgress?.progress_percentage || 0;
 
-  // Fetch data on mount
+  // Fetch data on mount and when userId changes
   useEffect(() => {
     loadData();
-  }, []);
+  }, [userId]);
 
   // Animate progress bar and detect level up
   useEffect(() => {
@@ -180,11 +179,17 @@ export default function RewardsScreen({ navigation }: Props) {
   }, [totalReports, ticketProgressPercentage, currentLevel]);
 
   const loadData = async () => {
+    if (!userId) {
+      console.log('No userId, skipping rewards data load');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       setIsLoading(true);
       const [reports, progress] = await Promise.all([
-        rewardsService.getUserReports(CURRENT_USER_ID, 'verified'),
-        rewardsService.getUserProgress(CURRENT_USER_ID),
+        rewardsService.getUserReports(userId, 'verified'),
+        rewardsService.getUserProgress(userId),
       ]);
 
       setProvenReports(reports);
@@ -199,10 +204,15 @@ export default function RewardsScreen({ navigation }: Props) {
   };
 
   const handleAddReport = async () => {
+    if (!userId) {
+      console.log('No userId, cannot add report');
+      return;
+    }
+
     try {
       // Create a new report
       const newReport = await rewardsService.createReport({
-        user_id: CURRENT_USER_ID,
+        user_id: userId,
         bus_number: '999',
         issue: 'Test report',
         status: 'pending',

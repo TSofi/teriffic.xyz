@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useUser } from '../context/UserContext';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -23,7 +24,15 @@ const MOBILE_WIDTH = 585; // iPhone 13 width * 1.5
 const MOBILE_HEIGHT = 844; // iPhone 13 height
 
 export default function LoginScreen({ navigation }: Props) {
+  const { setUserId } = useUser();
+
   const handleGuestLogin = () => {
+    setUserId(1);
+    navigation.navigate('Main');
+  };
+
+  const handleGuest2Login = () => {
+    setUserId(2);
     navigation.navigate('Main');
   };
 
@@ -51,6 +60,17 @@ export default function LoginScreen({ navigation }: Props) {
           activeOpacity={0.8}
         >
           <Text style={styles.loginButtonText}>Login as Guest</Text>
+          <View style={styles.arrow}>
+            <Text style={styles.arrowText}>›</Text>
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.loginButton, styles.guest2Button]}
+          onPress={handleGuest2Login}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.loginButtonText}>Guest 2</Text>
           <View style={styles.arrow}>
             <Text style={styles.arrowText}>›</Text>
           </View>
@@ -135,12 +155,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 30,
-    marginBottom: 20,
+    marginBottom: 15,
     elevation: 5,
     shadowColor: '#FFFFFF',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  guest2Button: {
+    marginBottom: 20,
   },
   loginButtonText: {
     fontSize: 20,

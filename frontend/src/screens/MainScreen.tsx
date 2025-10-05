@@ -16,6 +16,7 @@ import MapComponent from '../components/MapComponent';
 import { aiService, reverseGeocode, geocodeAddress, planRoute } from '../services/aiService';
 import { notificationService, Notification } from '../services/notificationService';
 import NotificationToast from '../components/NotificationToast';
+import { useUser } from '../context/UserContext';
 
 type MainScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
@@ -34,6 +35,7 @@ interface ChatMessageType {
 }
 
 export default function MainScreen({ navigation }: Props) {
+  const { userId } = useUser();
   const [arrivalPoint, setArrivalPoint] = useState('');
   const [destinationPoint, setDestinationPoint] = useState('');
   const [chatMessage, setChatMessage] = useState('');
@@ -99,7 +101,14 @@ export default function MainScreen({ navigation }: Props) {
   }, []);
 
   useEffect(() => {
-    // Connect to notification stream
+    // Only connect if userId is set
+    if (userId === null) {
+      console.log('No userId set, skipping notification service');
+      return;
+    }
+
+    // Set user ID in notification service and connect
+    notificationService.setUserId(userId);
     notificationService.connect();
 
     // Subscribe to notifications
@@ -113,7 +122,7 @@ export default function MainScreen({ navigation }: Props) {
       unsubscribe();
       notificationService.disconnect();
     };
-  }, []);
+  }, [userId]);
 
   const busLines = [
     { number: '999', color: ['#E63946', '#DC2F02'] },
@@ -646,6 +655,13 @@ export default function MainScreen({ navigation }: Props) {
                   {Math.ceil(routeData.total_journey_time_minutes)} min
                 </Text>
               </View>
+              {routeData.reported_delay_seconds > 0 && (
+                <View style={[styles.timeTag, { borderColor: '#E63946', backgroundColor: '#E63946', marginLeft: 8 }]}>
+                  <Text style={[styles.timeTagText, { color: '#FFFFFF' }]}>
+                    +{Math.ceil(routeData.reported_delay_seconds / 60)} min
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         )}
